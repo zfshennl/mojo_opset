@@ -1,3 +1,4 @@
+import math
 import random
 
 from functools import partial
@@ -7,6 +8,8 @@ import torch
 
 from mojo_opset import functions as F
 from tests._checks import assert_close
+
+KS_ALPHA = 1e-4
 
 PENALTY_SHAPES = [(20, 151936)]
 
@@ -28,6 +31,38 @@ def accepted_prefix(result):
     return tokens.masked_fill(~valid, 0).long(), lengths.long()
 
 
+def kolmogorov_sf(x):
+    total, factor, previous = 0.0, 2.0, 0.0
+    for k in range(1, 101):
+        term = factor * math.exp(-2.0 * k * k * x * x)
+        total += term
+        if abs(term) <= 0.001 * previous or abs(term) <= 1e-8 * total:
+            return total
+        factor = -factor
+        previous = abs(term)
+    return 1.0
+
+
+def ks_2samp(actual, expected, rtol=1e-5):
+    n_actual, n_expected = actual.shape[1], expected.shape[1]
+    combined = torch.cat([actual, expected], dim=1)
+    order = torch.argsort(combined, dim=1)
+    sorted_values = torch.gather(combined, 1, order)
+    cdf_actual = torch.cumsum((order < n_actual).to(actual.dtype), dim=1) / n_actual
+    cdf_expected = torch.cumsum((order >= n_actual).to(actual.dtype), dim=1) / n_expected
+    difference = (cdf_actual - cdf_expected).abs()
+    # Different fp32 reductions make the same logical probability differ by ~1e-7
+    # across implementations; merge adjacent values within the relative tolerance
+    # into one tie group, or every group splits and D jumps by the group's mass.
+    magnitude = torch.maximum(sorted_values[:, :-1].abs(), sorted_values[:, 1:].abs()).clamp_min(1e-30)
+    group_end = torch.ones_like(difference, dtype=torch.bool)
+    group_end[:, :-1] = (sorted_values[:, 1:] - sorted_values[:, :-1]) > rtol * magnitude
+    statistic = (difference * group_end).amax(dim=1)
+    en = math.sqrt(n_actual * n_expected / (n_actual + n_expected))
+    p_value = torch.tensor([kolmogorov_sf(en * value) for value in statistic.tolist()])
+    return statistic, p_value
+
+
 def check_sampling(name, actual_fn, reference_fn, logits):
     if name == "top_p_filter":
         actual_probs, actual_ids = actual_fn(logits.clone())
@@ -36,18 +71,30 @@ def check_sampling(name, actual_fn, reference_fn, logits):
         torch.testing.assert_close(actual_ids.sort(-1).values, expected_ids.sort(-1).values, rtol=0, atol=0)
         return
     # Different sampling algorithms need not draw the same token under one seed.
-    # Retain master's 200-draw nucleus statistics and apply the same check to top-k.
-    actual_probs, expected_probs = [], []
+    # Draw 200 samples per row and compare the drawn-probability distributions with a
+    # two-sample KS test, per row and pooled: per row catches localized errors, pooled
+    # catches small biases shared by all rows. ks_2samp merges values within fp32
+    # jitter so equivalent probabilities from different reductions stay one tie group.
+    actual_probs_list, expected_probs_list = [], []
     for _ in range(200):
         expected_p, expected_ids = reference_fn(logits.clone())
         actual_p, actual_ids = actual_fn(logits.clone())
         assert actual_ids.shape == expected_ids.shape
         assert bool(((actual_ids >= 0) & (actual_ids < logits.shape[-1])).all())
-        actual_probs.append(actual_p.float())
-        expected_probs.append(expected_p.float())
-    actual, expected = torch.cat(actual_probs, 1), torch.cat(expected_probs, 1)
-    for reduction in (torch.mean, torch.std):
-        assert_close(reduction(actual, dim=1), reduction(expected, dim=1), torch.float32, rtol=1e-2, atol=1e-2)
+        actual_probs_list.append(actual_p.float())
+        expected_probs_list.append(expected_p.float())
+    actual, expected = torch.cat(actual_probs_list, 1), torch.cat(expected_probs_list, 1)
+    cases = [
+        (f"row {index}", actual[index : index + 1], expected[index : index + 1]) for index in range(actual.shape[0])
+    ]
+    cases.append(("pooled rows", actual.reshape(1, -1), expected.reshape(1, -1)))
+    # KS_ALPHA is the false-fail budget for the whole run; splitting it across all
+    # checks (Bonferroni) keeps repeated runs with fresh seeds from accumulating flakes.
+    threshold = KS_ALPHA / len(cases)
+    for label, rows_actual, rows_expected in cases:
+        statistic, p_value = ks_2samp(rows_actual, rows_expected)
+        stat, p = statistic.item(), p_value.item()
+        assert p >= threshold, f"{label}: sampling distributions differ (ks_statistic={stat:.4g}, p_value={p:.4g})"
 
 
 def make_penalty_case(shape, device):
