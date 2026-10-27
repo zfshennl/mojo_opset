@@ -1,5 +1,6 @@
 """Per-call profiler span/sum, batched stream events and synchronized wall latency."""
 
+import contextlib
 import json
 import math
 import re
@@ -111,6 +112,7 @@ def measure(
     reduction="span",
     selectors=(),
     match="contains",
+    trace_dir=None,
 ):
     if warmup < 1 or repeats < 3:
         raise ValueError("warmup must be >= 1 and repeats >= 3")
@@ -122,6 +124,8 @@ def measure(
         raise ValueError("Invalid profiler reduction or selector match mode")
     if "profiler" not in timers and (selectors or reduction != "span"):
         raise ValueError("Kernel selection/reduction requires profiler timing")
+    if trace_dir is not None and "profiler" not in timers:
+        raise ValueError("Trace retention requires profiler timing")
     if match == "regex":
         for selector in selectors:
             re.compile(selector)
@@ -198,8 +202,12 @@ def measure(
 
     if "profiler" in timers:
         details = []
-        with tempfile.TemporaryDirectory(prefix="mojo-perf-") as directory:
-            trace_path = adapter.collect_trace(profile_samples, Path(directory))
+        # Retained traces stay on disk in trace_dir; temporary ones vanish with the context.
+        with contextlib.ExitStack() as stack:
+            directory = trace_dir
+            if directory is None:
+                directory = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="mojo-perf-")))
+            trace_path = adapter.collect_trace(profile_samples, directory)
             trace = json.loads(trace_path.read_text(encoding="utf-8"))
             samples = kernel_spans(
                 trace,
