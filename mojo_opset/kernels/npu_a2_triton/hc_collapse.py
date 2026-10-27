@@ -6,6 +6,7 @@ import triton.language as tl
 
 from mojo_opset.kernels._npu_triton_utils import get_num_cores
 from mojo_opset.kernels._npu_triton_utils import libentry
+from mojo_opset.kernels._triton_utils import input_guard
 
 # Whole-row tile cap, found by trial against the target's Unified Buffer:
 # A5 (256KB UB) compiles and runs up to 12288 elements per tile; A2 (192KB
@@ -70,7 +71,7 @@ def _hc_collapse_kernel(
 
         tl.store(out_row + offsets, acc.to(out_ptr.dtype.element_ty), mask=col_mask)
 
-
+@input_guard(make_contiguous=True)
 def hc_collapse_impl(x: torch.Tensor, pre_mix: torch.Tensor) -> torch.Tensor:
     num_tokens, hc_mult, hidden_size = x.shape
     out = torch.empty(num_tokens, hidden_size, dtype=x.dtype, device=x.device)
