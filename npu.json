@@ -1,0 +1,3015 @@
+{
+  "schema_version": 2,
+  "created_at": "2026-10-27T03:25:18.312311+00:00",
+  "revision": {
+    "commit": "923e9c5bf9cbae49a716797d4f6894bfc0f84f26",
+    "dirty": ""
+  },
+  "cases": [
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[orig-decode-1]",
+      "parameters": {
+        "num_tokens": 1,
+        "hc_mult": 4,
+        "hidden_size": 5120,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 38.647999999999996,
+          "p10": 36.344,
+          "p90": 46.41,
+          "mad": 2.137999999999998,
+          "samples": [
+            76.384,
+            46.41,
+            46.771,
+            43.005,
+            42.313,
+            40.24,
+            40.711,
+            41.573,
+            37.927,
+            37.757,
+            36.344,
+            37.186,
+            39.359,
+            36.995,
+            36.435,
+            37.116,
+            35.674,
+            37.937,
+            45.088,
+            37.265
+          ]
+        },
+        "profiler_span_us": {
+          "median": 1.5809999999999604,
+          "p10": 1.5489999999999782,
+          "p90": 1.6330000000000382,
+          "mad": 0.019499999999993634,
+          "samples": [
+            1.6100000000000136,
+            1.5750000000000455,
+            1.58299999999997,
+            1.5610000000000355,
+            1.5730000000000928,
+            1.6140000000000327,
+            1.5889999999999418,
+            1.6089999999999236,
+            1.5619999999998981,
+            1.6340000000000146,
+            1.518000000000029,
+            1.5640000000000782,
+            1.58400000000006,
+            1.5889999999999418,
+            1.5789999999999509,
+            1.5599999999999454,
+            1.6449999999999818,
+            1.6330000000000382,
+            1.5630000000001019,
+            1.5489999999999782
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.6100000000000136
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5750000000000455
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.58299999999997
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5610000000000355
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5730000000000928
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.6140000000000327
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5889999999999418
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.6089999999999236
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5619999999998981
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.6340000000000146
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.518000000000029
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5640000000000782
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.58400000000006
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5889999999999418
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5789999999999509
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5599999999999454
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.6449999999999818
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.6330000000000382
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5630000000001019
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 1.5489999999999782
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 82944,
+        "peak_allocated_bytes": 93184,
+        "incremental_peak_bytes": 10240
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[orig-tail-33x5137]",
+      "parameters": {
+        "num_tokens": 33,
+        "hc_mult": 4,
+        "hidden_size": 5137,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 36.1995,
+          "p10": 33.31,
+          "p90": 39.97,
+          "mad": 1.211500000000001,
+          "samples": [
+            40.13,
+            39.97,
+            37.837,
+            38.297,
+            35.113,
+            37.136,
+            36.385,
+            35.624,
+            36.255,
+            35.984,
+            33.6,
+            33.56,
+            37.165,
+            45.538,
+            36.144,
+            34.863,
+            33.31,
+            35.704,
+            36.465,
+            32.268
+          ]
+        },
+        "profiler_span_us": {
+          "median": 4.4454999999999245,
+          "p10": 3.907000000000039,
+          "p90": 4.793000000000006,
+          "mad": 0.21350000000001046,
+          "samples": [
+            4.206000000000017,
+            4.192999999999984,
+            4.793000000000006,
+            3.907000000000039,
+            4.640999999999963,
+            4.497000000000071,
+            4.627999999999929,
+            4.365000000000009,
+            4.304000000000087,
+            3.994999999999891,
+            4.4659999999998945,
+            4.902000000000044,
+            4.309999999999945,
+            4.548999999999978,
+            4.261999999999944,
+            3.7539999999999054,
+            4.4249999999999545,
+            4.882000000000062,
+            4.711999999999989,
+            4.676999999999907
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.206000000000017
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.192999999999984
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.793000000000006
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.907000000000039
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.640999999999963
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.497000000000071
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.627999999999929
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.365000000000009
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.304000000000087
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.994999999999891
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.4659999999998945
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.902000000000044
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.309999999999945
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.548999999999978
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.261999999999944
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.7539999999999054
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.4249999999999545
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.882000000000062
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.711999999999989
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.676999999999907
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 2714624,
+        "peak_allocated_bytes": 3054080,
+        "incremental_peak_bytes": 339456
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[orig-decode-128]",
+      "parameters": {
+        "num_tokens": 128,
+        "hc_mult": 4,
+        "hidden_size": 5120,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 42.7695,
+          "p10": 40.411,
+          "p90": 45.958,
+          "mad": 1.027000000000001,
+          "samples": [
+            46.069,
+            43.034,
+            42.474,
+            42.915,
+            41.863,
+            43.476,
+            45.958,
+            41.842,
+            39.71,
+            41.011,
+            42.995,
+            44.747,
+            47.241,
+            43.896,
+            42.624,
+            43.195,
+            40.411,
+            41.872,
+            41.312,
+            41.563
+          ]
+        },
+        "profiler_span_us": {
+          "median": 7.110500000000002,
+          "p10": 6.715000000000032,
+          "p90": 7.704999999999927,
+          "mad": 0.3235000000000241,
+          "samples": [
+            7.251999999999953,
+            7.6159999999999854,
+            6.715000000000032,
+            6.746999999999957,
+            7.9389999999999645,
+            7.685999999999922,
+            6.8409999999998945,
+            7.704999999999927,
+            7.013999999999896,
+            7.16599999999994,
+            7.176999999999907,
+            6.690000000000055,
+            6.826999999999998,
+            6.945999999999913,
+            6.842000000000098,
+            7.567999999999984,
+            7.642000000000053,
+            7.724999999999909,
+            7.055000000000064,
+            6.936999999999898
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.251999999999953
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.6159999999999854
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.715000000000032
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.746999999999957
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.9389999999999645
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.685999999999922
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.8409999999998945
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.704999999999927
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.013999999999896
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.16599999999994
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.176999999999907
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.690000000000055
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.826999999999998
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.945999999999913
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.842000000000098
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.567999999999984
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.642000000000053
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.724999999999909
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 7.055000000000064
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.936999999999898
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 10489856,
+        "peak_allocated_bytes": 11800576,
+        "incremental_peak_bytes": 1310720
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[orig-prefill-1024]",
+      "parameters": {
+        "num_tokens": 1024,
+        "hc_mult": 4,
+        "hidden_size": 5120,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 70.9915,
+          "p10": 68.623,
+          "p90": 72.199,
+          "mad": 0.9264999999999972,
+          "samples": [
+            75.363,
+            71.848,
+            71.357,
+            71.217,
+            69.725,
+            70.015,
+            71.367,
+            71.337,
+            71.868,
+            74.461,
+            69.905,
+            72.199,
+            68.623,
+            69.824,
+            70.766,
+            69.604,
+            70.726,
+            71.508,
+            70.255,
+            66.43
+          ]
+        },
+        "profiler_span_us": {
+          "median": 32.7204999999999,
+          "p10": 31.94100000000003,
+          "p90": 33.039000000000215,
+          "mad": 0.25650000000018736,
+          "samples": [
+            31.729000000000042,
+            32.19200000000001,
+            32.67399999999998,
+            32.37800000000004,
+            32.625999999999976,
+            32.971000000000004,
+            32.7829999999999,
+            32.787000000000035,
+            32.96399999999994,
+            33.14200000000005,
+            31.94100000000003,
+            32.61699999999996,
+            32.4849999999999,
+            32.0329999999999,
+            32.23199999999997,
+            33.14300000000003,
+            32.97200000000021,
+            32.766999999999825,
+            33.039000000000215,
+            32.98199999999997
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 31.729000000000042
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.19200000000001
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.67399999999998
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.37800000000004
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.625999999999976
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.971000000000004
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.7829999999999
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.787000000000035
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.96399999999994
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 33.14200000000005
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 31.94100000000003
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.61699999999996
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.4849999999999
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.0329999999999
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.23199999999997
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 33.14300000000003
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.97200000000021
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.766999999999825
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 33.039000000000215
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 32.98199999999997
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 83918848,
+        "peak_allocated_bytes": 94404608,
+        "incremental_peak_bytes": 10485760
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[orig-mult8-7x5137]",
+      "parameters": {
+        "num_tokens": 7,
+        "hc_mult": 8,
+        "hidden_size": 5137,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 38.4025,
+          "p10": 35.834,
+          "p90": 41.573,
+          "mad": 1.3015000000000008,
+          "samples": [
+            58.057,
+            54.682,
+            41.573,
+            39.87,
+            38.047,
+            40.591,
+            37.066,
+            40.471,
+            39.339,
+            37.927,
+            37.807,
+            36.936,
+            39.178,
+            37.897,
+            37.326,
+            35.834,
+            35.103,
+            38.758,
+            39.609,
+            37.136
+          ]
+        },
+        "profiler_span_us": {
+          "median": 3.1755000000000564,
+          "p10": 2.394999999999982,
+          "p90": 3.3450000000000273,
+          "mad": 0.14199999999993906,
+          "samples": [
+            3.3450000000000273,
+            3.0389999999999873,
+            2.394999999999982,
+            3.2000000000000455,
+            3.2029999999999745,
+            3.173000000000002,
+            3.2260000000001128,
+            3.1440000000000055,
+            2.7170000000000982,
+            3.438000000000102,
+            3.038000000000011,
+            3.2260000000001128,
+            2.7739999999998872,
+            3.178000000000111,
+            2.298000000000002,
+            3.321999999999889,
+            3.185999999999922,
+            2.9700000000000273,
+            2.786000000000058,
+            3.393000000000029
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.3450000000000273
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.0389999999999873
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 2.394999999999982
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.2000000000000455
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.2029999999999745
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.173000000000002
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.2260000000001128
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.1440000000000055
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 2.7170000000000982
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.438000000000102
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.038000000000011
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.2260000000001128
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 2.7739999999998872
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.178000000000111
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 2.298000000000002
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.321999999999889
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.185999999999922
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 2.9700000000000273
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 2.786000000000058
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 3.393000000000029
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 1152000,
+        "peak_allocated_bytes": 1224192,
+        "incremental_peak_bytes": 72192
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[orig-hidden-4096]",
+      "parameters": {
+        "num_tokens": 128,
+        "hc_mult": 4,
+        "hidden_size": 4096,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 39.775000000000006,
+          "p10": 37.706,
+          "p90": 43.275,
+          "mad": 1.7124999999999986,
+          "samples": [
+            46.53,
+            42.904,
+            41.953,
+            38.518,
+            39.059,
+            36.715,
+            43.275,
+            41.532,
+            38.357,
+            47.201,
+            39.599,
+            40.13,
+            42.394,
+            39.77,
+            42.534,
+            38.918,
+            37.706,
+            39.78,
+            38.107,
+            38.888
+          ]
+        },
+        "profiler_span_us": {
+          "median": 6.086500000000001,
+          "p10": 5.550999999999931,
+          "p90": 6.548000000000002,
+          "mad": 0.22299999999995634,
+          "samples": [
+            6.663999999999987,
+            5.58299999999997,
+            5.544000000000096,
+            6.689000000000078,
+            6.548000000000002,
+            6.183999999999969,
+            5.88799999999992,
+            6.345000000000027,
+            6.246000000000095,
+            6.029999999999973,
+            6.121000000000095,
+            6.051999999999907,
+            5.741999999999962,
+            5.781999999999925,
+            5.8530000000000655,
+            6.13799999999992,
+            6.218000000000075,
+            6.298999999999978,
+            5.88799999999992,
+            5.550999999999931
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.663999999999987
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.58299999999997
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.544000000000096
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.689000000000078
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.548000000000002
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.183999999999969
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.88799999999992
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.345000000000027
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.246000000000095
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.029999999999973
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.121000000000095
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.051999999999907
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.741999999999962
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.781999999999925
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.8530000000000655
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.13799999999992
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.218000000000075
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 6.298999999999978
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.88799999999992
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.550999999999931
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 8392704,
+        "peak_allocated_bytes": 9441280,
+        "incremental_peak_bytes": 1048576
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[orig-hidden-7168]",
+      "parameters": {
+        "num_tokens": 1024,
+        "hc_mult": 4,
+        "hidden_size": 7168,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 91.8175,
+          "p10": 88.272,
+          "p90": 95.333,
+          "mad": 1.6069999999999922,
+          "samples": [
+            103.646,
+            92.449,
+            95.914,
+            89.084,
+            92.098,
+            88.272,
+            93.08,
+            86.92,
+            90.135,
+            91.808,
+            92.589,
+            90.526,
+            95.333,
+            94.692,
+            94.312,
+            91.097,
+            90.286,
+            89.885,
+            90.445,
+            91.827
+          ]
+        },
+        "profiler_span_us": {
+          "median": 57.76750000000004,
+          "p10": 56.784000000000106,
+          "p90": 58.78899999999999,
+          "mad": 0.5405000000001792,
+          "samples": [
+            58.48199999999997,
+            58.37200000000007,
+            57.827999999999975,
+            58.78899999999999,
+            57.70700000000011,
+            58.159000000000106,
+            56.784000000000106,
+            58.70499999999993,
+            57.44900000000007,
+            55.88499999999999,
+            59.77599999999984,
+            57.233999999999924,
+            57.246000000000095,
+            56.8090000000002,
+            59.789999999999964,
+            58.0630000000001,
+            57.2199999999998,
+            57.30400000000009,
+            57.88700000000017,
+            57.61000000000013
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 58.48199999999997
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 58.37200000000007
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 57.827999999999975
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 58.78899999999999
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 57.70700000000011
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 58.159000000000106
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 56.784000000000106
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 58.70499999999993
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 57.44900000000007
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 55.88499999999999
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 59.77599999999984
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 57.233999999999924
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 57.246000000000095
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 56.8090000000002
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 59.789999999999964
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 58.0630000000001
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 57.2199999999998
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 57.30400000000009
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 57.88700000000017
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 57.61000000000013
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 117473280,
+        "peak_allocated_bytes": 132153344,
+        "incremental_peak_bytes": 14680064
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[v41-decode-64]",
+      "parameters": {
+        "num_tokens": 64,
+        "hc_mult": 4,
+        "hidden_size": 5120,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 42.9895,
+          "p10": 40.491,
+          "p90": 47.751,
+          "mad": 1.7879999999999967,
+          "samples": [
+            45.228,
+            44.146,
+            43.265,
+            40.491,
+            41.462,
+            42.714,
+            50.727,
+            45.038,
+            42.093,
+            42.544,
+            45.659,
+            42.064,
+            43.425,
+            42.614,
+            42.264,
+            39.529,
+            40.781,
+            50.306,
+            46.069,
+            47.751
+          ]
+        },
+        "profiler_span_us": {
+          "median": 5.2590000000000146,
+          "p10": 4.698000000000093,
+          "p90": 5.576999999999998,
+          "mad": 0.2305000000000632,
+          "samples": [
+            4.68100000000004,
+            4.769999999999982,
+            5.494000000000028,
+            5.231999999999971,
+            5.576999999999998,
+            5.383000000000038,
+            5.8810000000000855,
+            5.333000000000084,
+            5.001999999999953,
+            5.286000000000058,
+            4.81899999999996,
+            5.032999999999902,
+            5.373000000000047,
+            4.698000000000093,
+            5.1099999999999,
+            5.317999999999984,
+            4.9849999999999,
+            5.182999999999993,
+            5.748000000000047,
+            5.4789999999998145
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.68100000000004
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.769999999999982
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.494000000000028
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.231999999999971
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.576999999999998
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.383000000000038
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.8810000000000855
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.333000000000084
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.001999999999953
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.286000000000058
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.81899999999996
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.032999999999902
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.373000000000047
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.698000000000093
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.1099999999999
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.317999999999984
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 4.9849999999999
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.182999999999993
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.748000000000047
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 5.4789999999998145
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 5244928,
+        "peak_allocated_bytes": 5900288,
+        "incremental_peak_bytes": 655360
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[v41-decode-256]",
+      "parameters": {
+        "num_tokens": 256,
+        "hc_mult": 4,
+        "hidden_size": 5120,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 51.3625,
+          "p10": 48.172,
+          "p90": 53.79,
+          "mad": 1.1969999999999992,
+          "samples": [
+            51.928,
+            50.806,
+            50.916,
+            51.428,
+            53.79,
+            48.172,
+            52.249,
+            51.828,
+            48.884,
+            51.297,
+            47.391,
+            49.985,
+            54.091,
+            51.607,
+            49.034,
+            55.564,
+            50.346,
+            53.11,
+            51.898,
+            48.223
+          ]
+        },
+        "profiler_span_us": {
+          "median": 10.947000000000003,
+          "p10": 10.480000000000018,
+          "p90": 11.411000000000058,
+          "mad": 0.24099999999998545,
+          "samples": [
+            11.009000000000015,
+            10.756999999999948,
+            10.480000000000018,
+            11.032000000000039,
+            10.707000000000107,
+            10.521999999999935,
+            11.105999999999995,
+            11.413000000000011,
+            10.704999999999927,
+            11.589999999999918,
+            10.942999999999984,
+            11.192999999999984,
+            10.951000000000022,
+            10.804000000000087,
+            11.349999999999909,
+            11.19399999999996,
+            10.941000000000031,
+            10.383000000000038,
+            10.768000000000029,
+            11.411000000000058
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 11.009000000000015
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.756999999999948
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.480000000000018
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 11.032000000000039
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.707000000000107
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.521999999999935
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 11.105999999999995
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 11.413000000000011
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.704999999999927
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 11.589999999999918
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.942999999999984
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 11.192999999999984
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.951000000000022
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.804000000000087
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 11.349999999999909
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 11.19399999999996
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.941000000000031
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.383000000000038
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 10.768000000000029
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 11.411000000000058
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 20979712,
+        "peak_allocated_bytes": 23601152,
+        "incremental_peak_bytes": 2621440
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[v41-dspark-verify-1280]",
+      "parameters": {
+        "num_tokens": 1280,
+        "hc_mult": 4,
+        "hidden_size": 5120,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 79.27850000000001,
+          "p10": 76.795,
+          "p90": 83.776,
+          "mad": 2.238500000000002,
+          "samples": [
+            96.194,
+            79.389,
+            83.776,
+            78.057,
+            77.636,
+            81.663,
+            79.509,
+            91.086,
+            82.735,
+            78.017,
+            79.168,
+            74.592,
+            81.512,
+            78.808,
+            82.003,
+            76.916,
+            80.28,
+            76.795,
+            77.035,
+            78.597
+          ]
+        },
+        "profiler_span_us": {
+          "median": 40.178499999999985,
+          "p10": 39.442999999999984,
+          "p90": 41.42599999999993,
+          "mad": 0.5349999999999682,
+          "samples": [
+            40.289999999999964,
+            39.49599999999998,
+            40.339000000000055,
+            39.506000000000085,
+            41.42599999999993,
+            39.5630000000001,
+            40.634000000000015,
+            40.21900000000005,
+            40.12799999999993,
+            40.085000000000036,
+            40.79299999999989,
+            39.442999999999984,
+            40.34999999999991,
+            39.733999999999924,
+            41.51800000000003,
+            39.202000000000226,
+            42.077999999999975,
+            39.552999999999884,
+            40.39300000000003,
+            40.13799999999992
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 40.289999999999964
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 39.49599999999998
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 40.339000000000055
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 39.506000000000085
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 41.42599999999993
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 39.5630000000001
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 40.634000000000015
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 40.21900000000005
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 40.12799999999993
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 40.085000000000036
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 40.79299999999989
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 39.442999999999984
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 40.34999999999991
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 39.733999999999924
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 41.51800000000003
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 39.202000000000226
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 42.077999999999975
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 39.552999999999884
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 40.39300000000003
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 40.13799999999992
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 104898560,
+        "peak_allocated_bytes": 118005760,
+        "incremental_peak_bytes": 13107200
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[v41-chunked-prefill-2048]",
+      "parameters": {
+        "num_tokens": 2048,
+        "hc_mult": 4,
+        "hidden_size": 5120,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 122.644,
+          "p10": 118.849,
+          "p90": 136.515,
+          "mad": 3.380500000000005,
+          "samples": [
+            136.515,
+            126.87,
+            126.119,
+            122.164,
+            126.9,
+            123.124,
+            120.741,
+            126.349,
+            144.556,
+            124.807,
+            121.232,
+            121.322,
+            136.845,
+            119.259,
+            118.497,
+            120.972,
+            123.986,
+            119.268,
+            119.64,
+            118.849
+          ]
+        },
+        "profiler_span_us": {
+          "median": 83.08600000000001,
+          "p10": 80.12400000000002,
+          "p90": 84.41499999999996,
+          "mad": 1.2054999999999154,
+          "samples": [
+            84.654,
+            80.12400000000002,
+            84.10799999999995,
+            81.3599999999999,
+            84.28199999999993,
+            84.15699999999993,
+            84.45700000000011,
+            81.39800000000014,
+            82.91699999999992,
+            81.39499999999998,
+            83.9989999999998,
+            81.8710000000001,
+            84.41499999999996,
+            81.39899999999989,
+            83.09400000000005,
+            83.07799999999997,
+            83.36000000000013,
+            83.39800000000014,
+            82.26600000000008,
+            79.44799999999987
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 84.654
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 80.12400000000002
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 84.10799999999995
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 81.3599999999999
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 84.28199999999993
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 84.15699999999993
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 84.45700000000011
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 81.39800000000014
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 82.91699999999992
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 81.39499999999998
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 83.9989999999998
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 81.8710000000001
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 84.41499999999996
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 81.39899999999989
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 83.09400000000005
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 83.07799999999997
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 83.36000000000013
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 83.39800000000014
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 82.26600000000008
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 79.44799999999987
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 167837696,
+        "peak_allocated_bytes": 188809216,
+        "incremental_peak_bytes": 20971520
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[v41-chunked-prefill-8192]",
+      "parameters": {
+        "num_tokens": 8192,
+        "hc_mult": 4,
+        "hidden_size": 5120,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 413.4655,
+          "p10": 405.859,
+          "p90": 429.063,
+          "mad": 6.354500000000002,
+          "samples": [
+            456.755,
+            419.81,
+            417.326,
+            422.824,
+            413.32,
+            412.409,
+            414.151,
+            409.805,
+            429.154,
+            412.709,
+            413.611,
+            416.675,
+            406.199,
+            420.541,
+            407.101,
+            402.304,
+            406.039,
+            405.859,
+            429.063,
+            408.012
+          ]
+        },
+        "profiler_span_us": {
+          "median": 366.6405,
+          "p10": 364.40600000000086,
+          "p90": 369.1319999999996,
+          "mad": 1.520999999999276,
+          "samples": [
+            366.59199999999964,
+            369.1319999999996,
+            368.2370000000001,
+            366.5510000000004,
+            366.4899999999998,
+            366.6890000000003,
+            367.5640000000003,
+            370.6270000000004,
+            366.5730000000003,
+            365.5079999999998,
+            365.2999999999993,
+            368.35100000000057,
+            368.10299999999916,
+            364.4840000000004,
+            369.6810000000005,
+            363.33599999999933,
+            364.40600000000086,
+            368.21999999999935,
+            365.90999999999985,
+            368.6810000000005
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 366.59199999999964
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 369.1319999999996
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 368.2370000000001
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 366.5510000000004
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 366.4899999999998
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 366.6890000000003
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 367.5640000000003
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 370.6270000000004
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 366.5730000000003
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 365.5079999999998
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 365.2999999999993
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 368.35100000000057
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 368.10299999999916
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 364.4840000000004
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 369.6810000000005
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 363.33599999999933
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 364.40600000000086
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 368.21999999999935
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 365.90999999999985
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 368.6810000000005
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 671350784,
+        "peak_allocated_bytes": 755236864,
+        "incremental_peak_bytes": 83886080
+      }
+    },
+    {
+      "id": "tests/performance/functions/test_hc_collapse.py::test_hc_collapse[v41-chunked-prefill-16384]",
+      "parameters": {
+        "num_tokens": 16384,
+        "hc_mult": 4,
+        "hidden_size": 5120,
+        "dtype": "bfloat16",
+        "phase": "forward",
+        "op": "hc_collapse",
+        "implementation": "triton",
+        "workload_sha256": "bdabfaad404ac2b8d130c86edf113ede7dbc24191e1c0223b1c31546f15dc13c"
+      },
+      "metrics": {
+        "e2e_us": {
+          "median": 777.3910000000001,
+          "p10": 770.586,
+          "p90": 789.785,
+          "mad": 2.0429999999999495,
+          "samples": [
+            792.608,
+            784.897,
+            789.785,
+            775.363,
+            770.576,
+            778.438,
+            777.015,
+            773.3,
+            779.449,
+            775.743,
+            777.166,
+            797.216,
+            778.528,
+            778.017,
+            778.909,
+            770.937,
+            777.616,
+            770.586,
+            771.187,
+            776.515
+          ]
+        },
+        "profiler_span_us": {
+          "median": 731.8869999999997,
+          "p10": 728.9269999999997,
+          "p90": 735.3990000000013,
+          "mad": 2.0280000000002474,
+          "samples": [
+            736.5470000000005,
+            735.3150000000005,
+            733.9410000000007,
+            728.9269999999997,
+            728.6329999999998,
+            731.3209999999999,
+            734.2700000000004,
+            731.4959999999992,
+            731.7250000000004,
+            730.3719999999994,
+            730.9570000000003,
+            729.6699999999983,
+            737.8240000000005,
+            733.8889999999992,
+            732.0489999999991,
+            735.3990000000013,
+            734.4209999999985,
+            731.0980000000018,
+            732.5570000000007,
+            730.7220000000016
+          ],
+          "kernels": [
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 736.5470000000005
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 735.3150000000005
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 733.9410000000007
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 728.9269999999997
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 728.6329999999998
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 731.3209999999999
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 734.2700000000004
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 731.4959999999992
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 731.7250000000004
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 730.3719999999994
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 730.9570000000003
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 729.6699999999983
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 737.8240000000005
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 733.8889999999992
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 732.0489999999991
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 735.3990000000013
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 734.4209999999985
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 731.0980000000018
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 732.5570000000007
+              }
+            ],
+            [
+              {
+                "name": "_hc_collapse_kernel",
+                "start_us": 0.0,
+                "duration_us": 730.7220000000016
+              }
+            ]
+          ]
+        }
+      },
+      "memory": {
+        "baseline_allocated_bytes": 1342701568,
+        "peak_allocated_bytes": 1510473728,
+        "incremental_peak_bytes": 167772160
+      }
+    }
+  ],
+  "skipped": [],
+  "host": "ubuntu",
+  "environment": {
+    "target": "npu.a5.950pr",
+    "device_name": "Ascend950PR_9579",
+    "device_index": 0,
+    "total_memory": 132238016512,
+    "l2_bytes": 134217728,
+    "runner_id": "ubuntu",
+    "python": "3.11.17",
+    "torch": "2.13.0+cpu",
+    "torch_npu": "2.13.0",
+    "torch_mlu": null,
+    "triton": null,
+    "triton_distributions": {
+      "triton_ascend": "3.6.0"
+    }
+  },
+  "measurement": {
+    "timers": [
+      "e2e",
+      "profiler"
+    ],
+    "profiler_timer": "per_call_kernel_v5",
+    "event_timer": "current_stream_batch_v1",
+    "e2e_timer": "synchronized_wall_v2",
+    "memory": "allocator_peak_after_timing_v1",
+    "batch": 1,
+    "instances": 2,
+    "reduction": "span",
+    "cache": "rotate",
+    "warmup": 10,
+    "repeats": 20,
+    "harness_sha256": "8d0a31fecc81fa5d154ac7f86c1dd603bbf15a48174b66271a3eae8a95e35f3b"
+  },
+  "config": {
+    "ilu.generic": {
+      "group_rms_norm_infer": "triton",
+      "layer_norm_infer": "triton",
+      "residual_add_layer_norm_infer": "triton",
+      "residual_add_rms_norm_infer": "triton",
+      "rms_norm_infer": "triton"
+    },
+    "mlu.generic": {
+      "group_rms_norm_infer": "triton",
+      "layer_norm_infer": "triton"
+    },
+    "npu.a2": {
+      "apply_penalties_temperature": "triton",
+      "causal_conv1d": "triton",
+      "causal_conv1d_update_state_infer": "triton",
+      "dequant": "triton",
+      "dequant_swiglu_quant": "torch_npu",
+      "diffusion_attention": "triton",
+      "dynamic_quant": "triton",
+      "embedding_nf4_dequant": "triton",
+      "flash_attention": "triton",
+      "flash_attention_infer": "triton",
+      "flex_attention": "triton",
+      "flex_attention_v2": "triton",
+      "gelu": "triton",
+      "group_gemm": "triton",
+      "group_rms_norm_infer": "triton",
+      "hc_collapse": "triton",
+      "join_prob_reject_sampling": "triton",
+      "layer_norm_infer": "triton",
+      "layer_norm_quant": "torch_npu",
+      "lightning_indexer": "triton",
+      "moe_dynamic_quant": "triton",
+      "multimodal_rope_infer": "triton",
+      "n_gram_decode": "triton",
+      "n_gram_prefill": "triton",
+      "over_encoding_decode": "triton",
+      "paged_decode_gqa_infer": "triton",
+      "paged_decode_swa_infer": "triton",
+      "paged_prefill_gqa_infer": "triton",
+      "paged_prefill_swa_infer": "triton",
+      "prefill_gqa_infer": "torch_npu",
+      "quant_batch_gemm_reduce_sum": "torch_npu",
+      "quant_gemm": "triton",
+      "reject_sampling": "triton",
+      "residual_add_layer_norm_infer": "triton",
+      "residual_add_layer_norm_quant": "torch_npu",
+      "residual_add_rms_norm_infer": "triton",
+      "residual_add_rms_norm_quant": "torch_npu",
+      "rms_norm": "triton",
+      "rms_norm_infer": "triton",
+      "rms_norm_quant": "torch_npu",
+      "rope": "triton",
+      "rope_cos_sin": "triton",
+      "rope_infer": "triton",
+      "rotate_activation": "torch",
+      "sdpa_infer": "triton",
+      "silu": "triton",
+      "static_quant": "triton",
+      "store_lowrank": "triton",
+      "store_paged_kv_cache": "triton",
+      "swa": "triton",
+      "swa_infer": "triton",
+      "swiglu": "triton",
+      "top_k_sampling": "triton",
+      "top_p_filter": "triton",
+      "top_p_sampling": "triton",
+      "varlen_fa_infer": "native",
+      "vision_rope_2d_infer": "triton",
+      "vision_rope_cos_sin_2d": "triton"
+    },
+    "npu.a5": {
+      "apply_penalties_temperature": "triton",
+      "causal_conv1d": "triton",
+      "causal_conv1d_update_state_infer": "triton",
+      "dequant": "triton",
+      "dequant_swiglu_quant": "torch_npu",
+      "diffusion_attention": "triton",
+      "dynamic_quant": "triton",
+      "embedding_nf4_dequant": "triton",
+      "flash_attention": "triton",
+      "flash_attention_infer": "triton",
+      "flex_attention": "triton",
+      "flex_attention_v2": "triton",
+      "gelu": "triton",
+      "group_gemm": "triton",
+      "group_rms_norm_infer": "triton",
+      "hc_collapse": "triton",
+      "join_prob_reject_sampling": "triton",
+      "layer_norm_infer": "triton",
+      "layer_norm_quant": "torch_npu",
+      "lightning_indexer": "triton",
+      "moe_dynamic_quant": "triton",
+      "multimodal_rope_infer": "triton",
+      "n_gram_decode": "triton",
+      "n_gram_prefill": "triton",
+      "over_encoding_decode": "triton",
+      "paged_decode_gqa_infer": "triton",
+      "paged_decode_swa_infer": "triton",
+      "paged_prefill_gqa_infer": "triton",
+      "paged_prefill_swa_infer": "triton",
+      "prefill_gqa_infer": "torch_npu",
+      "quant_batch_gemm_reduce_sum": "torch_npu",
+      "quant_gemm": "triton",
+      "reject_sampling": "triton",
+      "residual_add_layer_norm_infer": "triton",
+      "residual_add_layer_norm_quant": "torch_npu",
+      "residual_add_rms_norm_infer": "triton",
+      "residual_add_rms_norm_quant": "torch_npu",
+      "rms_norm": "triton",
+      "rms_norm_infer": "triton",
+      "rms_norm_quant": "torch_npu",
+      "rope": "triton",
+      "rope_cos_sin": "triton",
+      "rope_infer": "triton",
+      "rotate_activation": "torch",
+      "sdpa_infer": "triton",
+      "silu": "triton",
+      "static_quant": "triton",
+      "store_lowrank": "triton",
+      "store_paged_kv_cache": "triton",
+      "swa": "triton",
+      "swa_infer": "triton",
+      "swiglu": "triton",
+      "top_k_sampling": "triton",
+      "top_p_filter": "triton",
+      "top_p_sampling": "triton",
+      "vision_rope_2d_infer": "triton",
+      "vision_rope_cos_sin_2d": "triton"
+    },
+    "npu.a5.950pr": {
+      "native_swa_infer": "native"
+    }
+  },
+  "exitstatus": 0
+}
