@@ -7,7 +7,7 @@ import triton.language as tl
 from mojo_opset.kernels._npu_triton_utils import get_num_cores
 from mojo_opset.kernels._npu_triton_utils import libentry
 
-HC_COLLAPSE_BLOCK_H = 1024
+HC_COLLAPSE_BLOCK_H = 5120
 
 
 @libentry()
