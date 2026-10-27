@@ -7,12 +7,12 @@ import triton.language as tl
 from mojo_opset.kernels._npu_triton_utils import get_num_cores
 from mojo_opset.kernels._npu_triton_utils import libentry
 
-# Whole-row tile cap: one token per task gives every stream a single maximal
-# contiguous burst and each pre-mix row exactly one scalar-load set per token
-# (measured best across the shape sweep; intermediate widths pay tail-lane
-# waste unless they divide hidden_size). The cap bounds the fp32 tile's UB
-# footprint on the smaller-A2 buffer for exotic hidden sizes.
-HC_COLLAPSE_BLOCK_H = 8192
+# Whole-row tile cap, found by trial against the target's Unified Buffer:
+# A5 (256KB UB) compiles and runs up to 12288 elements per tile; A2 (192KB
+# UB) scales proportionally (12288 * 192/256 = 9216). One token per task
+# maximizes the contiguous burst per stream; intermediate widths pay
+# tail-lane waste unless they divide hidden_size exactly.
+HC_COLLAPSE_BLOCK_H = 9216
 
 
 @libentry()
@@ -77,7 +77,6 @@ def hc_collapse_impl(x: torch.Tensor, pre_mix: torch.Tensor) -> torch.Tensor:
     if num_tokens == 0 or hidden_size == 0:
         return out
 
-    # Whole-row tile: BLOCK_H == hidden_size makes every task one token.
     block_h = min(hidden_size, HC_COLLAPSE_BLOCK_H)
     num_h_blocks = (hidden_size + block_h - 1) // block_h
     grid = (min(get_num_cores("vector"), num_tokens * num_h_blocks),)
