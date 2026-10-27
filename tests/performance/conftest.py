@@ -4,6 +4,8 @@ import importlib.metadata
 import json
 import os
 import platform
+import re
+import shutil
 import socket
 import subprocess
 import traceback
@@ -44,6 +46,13 @@ def _module_distributions(module):
     return {name: version for name in sorted(set(names)) if (version := _version(name)) is not None}
 
 
+def _case_trace_directory(root, node_id):
+    """One stable flattened directory per case; the digest suffix avoids sanitized collisions."""
+    sanitized = re.sub(r"[^A-Za-z0-9._=-]+", "-", node_id).strip("-")[:200]
+    digest = hashlib.sha256(node_id.encode()).hexdigest()[:8]
+    return Path(root) / f"{sanitized}-{digest}"
+
+
 def pytest_configure(config):
     if config.option.collectonly:
         return
@@ -59,6 +68,12 @@ def pytest_configure(config):
     output = Path(config.getoption("--perf-output")).resolve()
     if output.suffix != ".json":
         raise pytest.UsageError("--perf-output must be a .json path")
+    trace_root = config.getoption("--perf-trace-dir")
+    if trace_root is not None:
+        if "profiler" not in timers:
+            raise pytest.UsageError("--perf-trace-dir requires the profiler timer")
+        if Path(trace_root).exists() and not Path(trace_root).is_dir():
+            raise pytest.UsageError("--perf-trace-dir must be a directory path")
     config._mojo_perf_report = {
         "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -137,12 +152,20 @@ def benchmark(request, perf_environment, monkeypatch):
         selected = implementation or resolve_implementation(op, Target.parse(target))
         count = report["measurement"]["instances"]
         workload = [factory() for _ in range(count)]
+        trace_dir = None
+        trace_root = request.config.getoption("--perf-trace-dir")
+        if trace_root is not None:
+            trace_dir = _case_trace_directory(trace_root, request.node.nodeid)
+            # A fresh directory per run; adapters expect exactly one trace of their own.
+            shutil.rmtree(trace_dir, ignore_errors=True)
+            trace_dir.mkdir(parents=True, exist_ok=True)
         metrics = measure(
             workload,
             adapter,
             warmup=request.config.getoption("--perf-warmup"),
             repeats=request.config.getoption("--perf-repeats"),
             timers=report["measurement"]["timers"],
+            trace_dir=trace_dir,
         )
         row = {
             "id": request.node.nodeid,
@@ -154,6 +177,7 @@ def benchmark(request, perf_environment, monkeypatch):
             },
             "metrics": metrics,
             "memory": measure_memory(workload, adapter, device),
+            "trace_dir": None if trace_dir is None else str(trace_dir),
         }
         report["cases"].append(row)
         return row
@@ -189,3 +213,6 @@ def pytest_sessionfinish(session, exitstatus):
     terminal = session.config.pluginmanager.getplugin("terminalreporter")
     if terminal:
         terminal.write_line(f"Performance JSON: {output}")
+        trace_root = session.config.getoption("--perf-trace-dir")
+        if trace_root is not None:
+            terminal.write_line(f"Profiler traces: {Path(trace_root).resolve()}")
