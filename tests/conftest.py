@@ -44,6 +44,11 @@ def pytest_addoption(parser):
     perf.addoption("--perf-warmup", type=int, default=10)
     perf.addoption("--perf-repeats", type=int, default=20)
     perf.addoption("--perf-device", type=int, default=0)
+    perf.addoption(
+        "--perf-trace-dir",
+        default=None,
+        help="Retain raw per-case profiler traces under this directory; one subdirectory per case.",
+    )
 
 
 def pytest_ignore_collect(collection_path, config):

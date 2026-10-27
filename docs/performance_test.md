@@ -33,6 +33,7 @@ the timed region; legacy hardware-specific MFU estimates are not reported.
 | `--perf-repeats` | `20` | Samples per timer, at least 3 |
 | `--perf-instances` | `2` | Independent input/state instances to rotate, at least 2 |
 | `--perf-output` | `tests/performance/results/current.json` | JSON output, overwritten each run |
+| `--perf-trace-dir` | Discarded | Retain raw per-case profiler traces under this directory, one subdirectory per case |
 
 `MOJO_ACCURACY_IMPLEMENTATION` is no longer used. Select implementations through
 config (including `MOJO_OPS_CONFIG_PATH`) or `--mojo-implementation`.
@@ -42,6 +43,9 @@ config (including `MOJO_OPS_CONFIG_PATH`) or `--mojo-implementation`.
 - **Profiler:** time from the first device kernel's start to the last kernel's
   end for one call, including gaps. Reports include individual kernel details;
   NPU backward kernels launched by autograd worker threads are included.
+  Raw trace files are temporary; pass `--perf-trace-dir DIR` to retain each
+  case's trace (Chrome trace `trace.json`, or NPU `trace_view.json`) under a
+  per-case subdirectory, refreshed on every run.
 - **E2E:** host wall time for one call followed by device synchronization.
 - **Event:** optional current-stream event time for one call, not all-stream time.
 - **Memory:** allocator peak/incremental memory, measured separately after timing.
