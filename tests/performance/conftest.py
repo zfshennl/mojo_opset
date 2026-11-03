@@ -88,6 +88,8 @@ def pytest_configure(config):
 def perf_environment(pytestconfig, request):
     implementation, target, device_type = request.getfixturevalue("accuracy_backend")
     adapter = load_platform(Target.parse(target).platform)
+    if pytestconfig.getoption("--perf-l2-flush") and not hasattr(adapter, "make_l2_flush"):
+        pytest.fail("--perf-l2-flush is only supported by the npu performance adapter")
     index = pytestconfig.getoption("--perf-device")
     adapter.runtime.set_device(index)
     properties = adapter.runtime.get_device_properties(index)
@@ -118,6 +120,11 @@ def perf_environment(pytestconfig, request):
         "instances": pytestconfig.getoption("--perf-instances"),
         "reduction": "span",
         "cache": "rotate",
+        "l2_flush": (
+            f"{adapter.L2_FLUSH_METHOD}:{adapter.L2_FLUSH_BYTES}"
+            if pytestconfig.getoption("--perf-l2-flush")
+            else "none"
+        ),
         "warmup": pytestconfig.getoption("--perf-warmup"),
         "repeats": pytestconfig.getoption("--perf-repeats"),
         "harness_sha256": hashlib.sha256(
@@ -173,14 +180,20 @@ def benchmark(request, perf_environment, monkeypatch):
             # A fresh directory per run; adapters expect exactly one trace of their own.
             shutil.rmtree(trace_dir, ignore_errors=True)
             trace_dir.mkdir(parents=True, exist_ok=True)
-        metrics = measure(
-            workload,
-            adapter,
-            warmup=request.config.getoption("--perf-warmup"),
-            repeats=request.config.getoption("--perf-repeats"),
-            timers=report["measurement"]["timers"],
-            trace_dir=trace_dir,
-        )
+        l2_flush = adapter.make_l2_flush() if request.config.getoption("--perf-l2-flush") else None
+        try:
+            metrics = measure(
+                workload,
+                adapter,
+                warmup=request.config.getoption("--perf-warmup"),
+                repeats=request.config.getoption("--perf-repeats"),
+                timers=report["measurement"]["timers"],
+                trace_dir=trace_dir,
+                l2_flush=l2_flush,
+            )
+        finally:
+            # Drop the eviction buffer before the memory pass; see measure_memory.
+            del l2_flush
         row = {
             "id": request.node.nodeid,
             "parameters": {

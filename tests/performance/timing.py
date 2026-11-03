@@ -111,9 +111,12 @@ def measure(
     selectors=(),
     match="contains",
     trace_dir=None,
+    l2_flush=None,
 ):
     if warmup < 1 or repeats < 3:
         raise ValueError("warmup must be >= 1 and repeats >= 3")
+    if l2_flush is not None and not callable(l2_flush):
+        raise ValueError("l2_flush must be a callable or None")
     if not timers or len(set(timers)) != len(timers) or set(timers) - {"profiler", "event", "e2e"}:
         raise ValueError("Choose distinct profiler, event and/or e2e timers")
     if batch < 1:
@@ -150,6 +153,8 @@ def measure(
     if "e2e" in timers:
         e2e = []
         for _ in range(repeats):
+            if l2_flush is not None:
+                l2_flush()
             synchronize()
             start = time.perf_counter_ns()
             result = invoke()
@@ -167,6 +172,10 @@ def measure(
         end_event.record()
         synchronize()
         for _ in range(repeats):
+            if l2_flush is not None:
+                # Enqueued ahead of the start event on the same stream, so the
+                # eviction kernel precedes, and stays outside, the event window.
+                l2_flush()
             synchronize()
             start_event.record()
             for _ in range(batch):
@@ -184,6 +193,13 @@ def measure(
         synchronize()
         for index in range(repeats):
             synchronize()
+            if l2_flush is not None:
+                # Launch and finish the eviction kernel (an NPU buffer sum is a
+                # ReduceSum kernel) before the sample range opens, mirroring
+                # triton-ascend's rule of excluding cache-clear kernels from
+                # profiler statistics: it must never be attributed to a sample.
+                l2_flush()
+                synchronize()
             with torch.autograd.profiler.record_function(f"{SAMPLE_PREFIX}{index}"):
                 result = invoke()
                 synchronize()

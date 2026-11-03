@@ -49,6 +49,11 @@ def pytest_addoption(parser):
         default=None,
         help="Retain raw per-case profiler traces under this directory; one subdirectory per case.",
     )
+    perf.addoption(
+        "--perf-l2-flush",
+        action="store_true",
+        help="Clear NPU L2 before every measured call by summing a large buffer, as triton-ascend does (NPU only).",
+    )
 
 
 def pytest_ignore_collect(collection_path, config):
