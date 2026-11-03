@@ -136,3 +136,27 @@ def kernel_owners(events, ranges):
 
 def l2_bytes(properties):
     return getattr(properties, "L2_cache_size", None)
+
+
+# triton-ascend clears NPU L2 by reading a 192 MiB buffer once per measurement
+# (do_bench_npu); a read guarantees the cached lines are replaced.
+L2_FLUSH_METHOD = "buffer_sum_read_v1"
+L2_FLUSH_BYTES = 192 * 1024 * 1024
+
+
+def make_l2_flush():
+    """Allocate the L2 eviction buffer and return a callable that flushes it.
+
+    Like triton-ascend, the flush is a full-buffer sum: reading the buffer
+    replaces the L2 contents. float32 keeps every flush a single ReduceSum
+    kernel (an int32 buffer would add a cast kernel), and the call stays
+    asynchronous so callers can order it outside timed windows.
+    """
+    buffer = torch.empty(L2_FLUSH_BYTES // 4, dtype=torch.float32, device=f"npu:{runtime.current_device()}")
+
+    def flush():
+        buffer.sum()  # use buffer read to clear the L2 cache
+
+    flush()
+    runtime.synchronize()  # shake out of any npu error before measurement
+    return flush

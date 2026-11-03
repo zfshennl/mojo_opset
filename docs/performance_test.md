@@ -32,6 +32,7 @@ the timed region; legacy hardware-specific MFU estimates are not reported.
 | `--perf-warmup` | `10` | Warmup calls, at least 1 |
 | `--perf-repeats` | `20` | Samples per timer, at least 3 |
 | `--perf-instances` | `2` | Independent input/state instances to rotate, at least 2 |
+| `--perf-l2-flush` | off | Clear NPU L2 before every measured call (NPU only) |
 | `--perf-output` | `tests/performance/results/current.json` | JSON output, overwritten each run |
 | `--perf-trace-dir` | Discarded | Retain raw per-case profiler traces under this directory, one subdirectory per case |
 
@@ -48,12 +49,23 @@ config (including `MOJO_OPS_CONFIG_PATH`) or `--mojo-implementation`.
   per-case subdirectory, refreshed on every run.
 - **E2E:** host wall time for one call followed by device synchronization.
 - **Event:** optional current-stream event time for one call, not all-stream time.
+- **L2 flush:** with `--perf-l2-flush` (NPU only), the device L2 cache is
+  cleared before every measured call. This follows triton-ascend's
+  `do_bench_npu`: a 192 MiB buffer is read once by summing it, which replaces
+  the cached lines. The flush always runs outside the timed window (before the
+  wall-clock start, ahead of the start event on the stream, and before the
+  per-call profiler range opens and completes), so it is excluded from every
+  timer — including the flush's own `ReduceSum` kernel, which is never
+  attributed to a profiler sample. Enabling it on other platforms fails the
+  run; the NPU-only buffer sum is not mirrored elsewhere.
 - **Memory:** allocator peak/incremental memory, measured separately after timing.
   Allocations outside PyTorch's allocator may not be visible.
 
 Each input instance is initialized before measurement, and warmup is excluded.
 Rotate alternates independent inputs/state; increasing instances uses more memory
-and does not guarantee cold L2. It is not an explicit cache eviction policy.
+and does not guarantee cold L2. It is not an explicit cache eviction policy;
+use `--perf-l2-flush` for that. The flush buffer is released before the memory
+measurement and is not counted there.
 Stateful workloads must reset or otherwise bound state across repeated calls.
 
 ## Comparing revisions
