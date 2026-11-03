@@ -87,6 +87,8 @@ def pytest_configure(config):
 def perf_environment(pytestconfig, request):
     implementation, target, device_type = request.getfixturevalue("accuracy_backend")
     adapter = load_platform(Target.parse(target).platform)
+    if pytestconfig.getoption("--perf-l2-flush") and not hasattr(adapter, "make_l2_flush"):
+        pytest.fail("--perf-l2-flush is only supported by the npu performance adapter")
     index = pytestconfig.getoption("--perf-device")
     if int(os.getenv("WORLD_SIZE", "1")) > 1:
         index = int(os.environ["LOCAL_RANK"])
@@ -127,6 +129,11 @@ def perf_environment(pytestconfig, request):
             }
             for timer in timers
         },
+        "l2_flush": (
+            f"{adapter.L2_FLUSH_METHOD}:{adapter.L2_FLUSH_BYTES}"
+            if pytestconfig.getoption("--perf-l2-flush")
+            else "none"
+        ),
         "warmup": pytestconfig.getoption("--perf-warmup"),
         "repeats": pytestconfig.getoption("--perf-repeats"),
         "harness_sha256": hashlib.sha256(
@@ -180,20 +187,25 @@ def benchmark(request, perf_environment, monkeypatch):
             # A fresh directory per run; adapters expect exactly one trace of their own.
             shutil.rmtree(trace_dir, ignore_errors=True)
             trace_dir.mkdir(parents=True, exist_ok=True)
-        metrics = measure(
-            workload,
-            adapter,
-            make_flush_buffer=(
-                lambda: torch.empty(cache["profiler"]["flush_bytes"] // 4, dtype=torch.float32, device=device)
+        l2_flush = adapter.make_l2_flush() if request.config.getoption("--perf-l2-flush") else None
+        try:
+            metrics = measure(
+                workload,
+                adapter,
+                make_flush_buffer=(
+                    lambda: torch.empty(cache["profiler"]["flush_bytes"] // 4, dtype=torch.float32, device=device)
+                )
+                if "profiler" in cache
+                else None,
+                barrier=torch.distributed.barrier if parameters.get("num_ranks", 1) > 1 else None,
+                warmup=request.config.getoption("--perf-warmup"),
+                repeats=request.config.getoption("--perf-repeats"),
+                timers=report["measurement"]["timers"],
+                trace_dir=trace_dir,
+                l2_flush=l2_flush,
             )
-            if "profiler" in cache
-            else None,
-            barrier=torch.distributed.barrier if parameters.get("num_ranks", 1) > 1 else None,
-            warmup=request.config.getoption("--perf-warmup"),
-            repeats=request.config.getoption("--perf-repeats"),
-            timers=report["measurement"]["timers"],
-            trace_dir=trace_dir,
-        )
+        finally:
+            del l2_flush
         row = {
             "id": request.node.nodeid,
             "parameters": {
