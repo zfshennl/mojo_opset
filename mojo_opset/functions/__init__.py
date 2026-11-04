@@ -60,6 +60,7 @@ from .sdpa import diffusion_attention
 from .sdpa import sdpa_infer
 from .silu import silu
 from .store_lowrank import store_lowrank
+from .swiglu_gated_mlp import swiglu_gated_mlp
 from .swiglu import swiglu
 
 __all__ = [
@@ -112,6 +113,7 @@ __all__ = [
     "silu",
     "static_quant",
     "store_lowrank",
+    "swiglu_gated_mlp",
     "store_paged_kv_cache",
     "swa",
     "swa_infer",

@@ -51,6 +51,7 @@ OPS = {
     "rms_norm": "rmsnorm",
     "swa": "swa",
     "rope": "rope",
+    "swiglu_gated_mlp": "swiglu_gated_mlp",
 }
 
 

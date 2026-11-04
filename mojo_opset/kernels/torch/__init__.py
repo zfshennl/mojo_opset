@@ -61,6 +61,7 @@ OPS = {
     "swa_infer": "attention",
     "native_swa_infer": "attention",
     "rope": "rope",
+    "swiglu_gated_mlp": "swiglu_gated_mlp",
 }
 
 
