@@ -2,7 +2,6 @@ import pytest
 import torch
 
 from mojo_opset import functions
-from tests.performance._workload import training
 
 
 # SwigluGatedMlp workloads at the glm-5.3 / glm-5.3-flash model shapes:
@@ -23,26 +22,24 @@ from tests.performance._workload import training
         (512, 4096, 2048, 10.0),  # glm-5.3-flash shared experts prefill
     ],
 )
-@pytest.mark.parametrize("phase", ["forward", "backward", "forward_backward"])
-def test_swiglu_gated_mlp(benchmark, perf_environment, tokens, hidden, intermediate, limit, phase):
+def test_swiglu_gated_mlp(benchmark, perf_environment, tokens, hidden, intermediate, limit):
     _, device, _, implementation = perf_environment
 
     def factory():
-        x = torch.randn(tokens, hidden, device=device, dtype=torch.bfloat16, requires_grad=phase != "forward")
+        x = torch.randn(tokens, hidden, device=device, dtype=torch.bfloat16)
         weights = []
         for shape in ((intermediate, hidden), (intermediate, hidden), (hidden, intermediate)):
-            weight = torch.empty(shape, device=device, dtype=torch.bfloat16, requires_grad=phase != "forward")
+            weight = torch.empty(shape, device=device, dtype=torch.bfloat16)
             torch.nn.init.normal_(weight, 0, 0.02)  # GlmMoeDsaConfig.initializer_range
             weights.append(weight)
         inputs = (x, *weights)
-        call = lambda: functions.swiglu_gated_mlp(*inputs, swiglu_limit=limit, implementation=implementation)
-        return training(call, inputs, phase)
+        return lambda: functions.swiglu_gated_mlp(*inputs, swiglu_limit=limit, implementation=implementation)
 
     benchmark(
         factory=factory,
         op="swiglu_gated_mlp",
         shape=[tokens, hidden, intermediate],
         dtype="bfloat16",
-        phase=phase,
+        phase="forward",
         swiglu_limit=limit,
     )

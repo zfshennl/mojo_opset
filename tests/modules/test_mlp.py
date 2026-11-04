@@ -1,4 +1,4 @@
-"""Tests for modules.SwigluGatedMLP."""
+"""Tests for modules.SwigluGatedMLP (forward only)."""
 
 from functools import partial
 
@@ -23,17 +23,8 @@ SWIGLU_MLP_MODULE_CASES = [
 # transformers GlmMoeDsaConfig.initializer_range.
 WEIGHT_STD = 0.02
 
-# FP32 gradients keep blocked-GEMM accumulation order noise above the
-# elementwise default; half dtypes add 1-ulp snapping of the rounded
-# intermediates, budgeted like the grouped-GEMM matrix (see
-# tests/functions/test_swiglu_gated_mlp.py).
-SWIGLU_MLP_GRAD_TOLERANCES = {
-    torch.float32: (1e-3, 1e-3),
-    torch.float16: (2**-6, 1.0),
-    torch.bfloat16: (2**-6, 1.0),
-}
-
 SWIGLU_MLP_FORWARD_TOLERANCES = {
+    torch.float32: (None, None),
     torch.float16: (2**-6, 0.25),
     torch.bfloat16: (2**-6, 0.25),
 }
@@ -49,38 +40,6 @@ def _reference_forward(x, gate_weight, up_weight, down_weight, swiglu_limit):
         gate = gate.clamp(max=swiglu_limit)
         up = up.clamp(min=-swiglu_limit, max=swiglu_limit)
     return F.linear(F.silu(gate) * up, down_weight.to(compute_dtype))
-
-
-def _reference_backward(x, gate_weight, up_weight, down_weight, swiglu_limit, grad_output):
-    """Analytic Glm5NextTextMLP gradients with FP32 math."""
-    compute_dtype = torch.float32 if x.dtype in (torch.float16, torch.bfloat16) else x.dtype
-    x = x.to(compute_dtype)
-    grad_output = grad_output.to(compute_dtype)
-
-    gate = x @ gate_weight.to(compute_dtype).t()
-    up = x @ up_weight.to(compute_dtype).t()
-    gate_mask = torch.ones_like(gate)
-    up_mask = torch.ones_like(up)
-    if swiglu_limit > 0:
-        gate_mask = (gate <= swiglu_limit).to(compute_dtype)
-        up_mask = ((up >= -swiglu_limit) & (up <= swiglu_limit)).to(compute_dtype)
-        gate = gate.clamp(max=swiglu_limit)
-        up = up.clamp(min=-swiglu_limit, max=swiglu_limit)
-
-    sigmoid_gate = torch.sigmoid(gate)
-    silu_gate = gate * sigmoid_gate
-    dsilu_gate = sigmoid_gate * (1 + gate * (1 - sigmoid_gate))
-
-    dh = grad_output @ down_weight.to(compute_dtype)
-    dg = dh * up * dsilu_gate * gate_mask
-    du = dh * silu_gate * up_mask
-
-    return (
-        dg @ gate_weight.to(compute_dtype) + du @ up_weight.to(compute_dtype),
-        dg.t() @ x,
-        du.t() @ x,
-        grad_output.t() @ (silu_gate * up),
-    )
 
 
 def _init_module(hidden, intermediate, limit, implementation, device, dtype):
@@ -102,25 +61,15 @@ def test_swiglu_gated_mlp_module_accuracy(accuracy_backend, hidden, intermediate
     module = _init_module(hidden, intermediate, limit, implementation, device, dtype)
 
     tokens = 7 if hidden == 512 else 5
-    x = torch.randn(tokens, hidden, device=device, dtype=dtype, requires_grad=True)
-    grad_output = torch.randn(tokens, hidden, device=device, dtype=dtype)
+    x = torch.randn(tokens, hidden, device=device, dtype=dtype)
 
     actual = module(x)
     weights = (module.gate_proj.weight, module.up_proj.weight, module.down_proj.weight)
     expected = _reference_forward(x, *weights, limit).to(dtype)
-    expected_grads = _reference_backward(x, *weights, limit, grad_output)
 
     check = partial(assert_close, dtype=dtype)
-    frtol, fatol = SWIGLU_MLP_FORWARD_TOLERANCES.get(dtype, (None, None))
-    check(actual, expected, rtol=frtol, atol=fatol)
-
-    parameters = list(module.parameters())
-    actual_grads = torch.autograd.grad(actual, [x, *parameters], grad_output)
-    rtol, atol = SWIGLU_MLP_GRAD_TOLERANCES.get(dtype, (None, None))
-    for actual_grad, expected_grad, name in zip(
-        actual_grads, expected_grads, ("x", "gate_proj", "up_proj", "down_proj")
-    ):
-        check(actual_grad, expected_grad.to(dtype), name=f"grad_{name}", rtol=rtol, atol=atol)
+    rtol, atol = SWIGLU_MLP_FORWARD_TOLERANCES.get(dtype, (None, None))
+    check(actual, expected, rtol=rtol, atol=atol)
 
 
 @pytest.mark.api("modules.SwigluGatedMLP", ops=["swiglu_gated_mlp"])

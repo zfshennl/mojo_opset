@@ -1,45 +1,8 @@
-"""SwigluGatedMlp (SiLU-gated MLP with optional clamp) dispatched to one exact provider."""
+"""SwigluGatedMlp (SiLU-gated MLP with optional clamp, forward only) dispatched to one exact provider."""
 
 import torch
 
-from torch.autograd.function import once_differentiable
-
 from ._dispatch import load_impl
-
-
-class SwigluGatedMlpFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x, gate_weight, up_weight, down_weight, swiglu_limit, implementation, require_backward):
-        _check_swiglu_gated_mlp(x, gate_weight, up_weight, down_weight, swiglu_limit)
-        forward, ctx.backward_kernel = load_impl("swiglu_gated_mlp", implementation, require_backward=require_backward)
-        ctx.swiglu_limit = swiglu_limit
-        ctx.save_for_backward(x, gate_weight, up_weight, down_weight)
-        return forward(x, gate_weight, up_weight, down_weight, swiglu_limit)
-
-    @staticmethod
-    @once_differentiable
-    def backward(ctx, grad_output):
-        x, gate_weight, up_weight, down_weight = ctx.saved_tensors
-        needs = ctx.needs_input_grad[:4]
-        grads = ctx.backward_kernel(
-            grad_output.contiguous(),
-            x,
-            gate_weight,
-            up_weight,
-            down_weight,
-            ctx.swiglu_limit,
-            *needs,
-        )
-        # Backends whose backward is a registered custom op return placeholder
-        # empty tensors for skipped gradients; autograd requires None there.
-        # (Real gradients of empty inputs stay 2D [0, N] and are kept.)
-        mapped = []
-        for grad, need in zip(grads, needs):
-            if grad is not None and need and not (grad.dim() == 1 and grad.numel() == 0):
-                mapped.append(grad)
-            else:
-                mapped.append(None)
-        return (*mapped, None, None, None)
 
 
 def _check_swiglu_gated_mlp(x, gate_weight, up_weight, down_weight, swiglu_limit):
@@ -74,20 +37,14 @@ def swiglu_gated_mlp(
     swiglu_limit: float = 0.0,
     implementation: str | None = None,
 ) -> torch.Tensor:
-    """Gated MLP from transformers ``GlmMoeDsaMLP`` / ``Glm5NextTextMLP``:
+    """Gated MLP forward from transformers ``GlmMoeDsaMLP`` / ``Glm5NextTextMLP``:
 
     ``down_proj(silu(clamp(gate_proj(x), max=swiglu_limit)) * clamp(up_proj(x), +-swiglu_limit))``
     over ``nn.Linear``-layout weights (``gate``/``up``: ``[intermediate, hidden]``,
     ``down``: ``[hidden, intermediate]``, no bias). ``swiglu_limit=0`` disables the
     clamp (glm-5.3: hidden 6144 / intermediate 12288); glm-5.3-flash (hidden 4096)
-    sets ``swiglu_limit=10.0``.
+    sets ``swiglu_limit=10.0``. Forward only — no backward is provided.
     """
-    return SwigluGatedMlpFunction.apply(
-        x,
-        gate_weight,
-        up_weight,
-        down_weight,
-        float(swiglu_limit),
-        implementation,
-        torch.is_grad_enabled() and any(t.requires_grad for t in (x, gate_weight, up_weight, down_weight)),
-    )
+    _check_swiglu_gated_mlp(x, gate_weight, up_weight, down_weight, swiglu_limit)
+    forward, _ = load_impl("swiglu_gated_mlp", implementation)
+    return forward(x, gate_weight, up_weight, down_weight, float(swiglu_limit))
