@@ -27,28 +27,33 @@ experts); glm-5.3-flash uses hidden 4096 with swiglu_limit=10.0.
 Modifications for NPU architecture by triton-x team, 2025.
 """
 
-# A5: 512 KiB CBUF bounds the live dot tiles; FP32 halves BLOCK_K (see
-# group_gemm). Stage 1 holds TWO FP32 accumulators per tile, so its BM*BN
-# area is capped (8192 elems = 64 KiB of accumulators): BM=128 pairs with
-# BN=64, BM<=64 keeps BN=128 for small-M core utilization.
-_GEMM_BLOCK_K = {4: 64, 2: 128}
-_MM1_ACC_MAX_ELEMS = 8192
+# A5 tile tables, DECOUPLED per stage (rows-class -> (BM, BN, BK) for bf16;
+# fp32 halves BK, and halves BN when BM=128). Swept warm on 950PR: decode
+# (rows<=16) wants deep K steps (BK=512, narrow BN=64), large M wants wide
+# tiles with BK=256; stage 2 (single accumulator) goes wider than stage 1.
+_MM1_TILES = {
+    16: (16, 64, 512),
+    32: (32, 64, 256),
+    64: (64, 128, 128),
+    128: (128, 128, 256),
+}
+_MM2_TILES = {
+    16: (16, 64, 512),
+    32: (32, 128, 256),
+    64: (32, 128, 128),
+    128: (128, 256, 256),
+}
 
 
-def _gemm_block_m(rows: int) -> int:
-    """Smallest GEMM tile row band >= rows so decode never wastes a 256-row tile."""
-    if rows <= 16:
-        return 16
-    if rows <= 32:
-        return 32
-    if rows <= 64:
-        return 64
-    return 128
-
-
-def _gemm_block_n(rows: int, cols: int) -> int:
-    """Narrower column tiles for GEMV-like shapes so tiles cover all cube cores."""
-    return 64 if rows <= 32 and cols % 64 == 0 else 128
+def _stage_tiles(tiles, rows: int, esize: int):
+    """Deterministic per-stage (BM, BN, BK) from the swept tables."""
+    key = 16 if rows <= 16 else 32 if rows <= 32 else 64 if rows <= 64 else 128
+    block_m, block_n, block_k = tiles[key]
+    if esize == 4:  # fp32 doubles tile bytes: halve K depth, cap the wide tiles
+        block_k //= 2
+        if block_m == 128:
+            block_n //= 2
+    return block_m, block_n, block_k
 
 
 @libentry()
@@ -195,13 +200,11 @@ def swiglu_gated_mlp_fwd_impl(
     up_weight = up_weight.contiguous()
     down_weight = down_weight.contiguous()
     gemm_cores = get_num_cores("cube")
-    block_k = _GEMM_BLOCK_K[x.element_size()]
 
     # Stage 1: fused gate/up projections + SwiGLU (gate/up never hit GM).
     # B tiles address Wg^T / Wu^T through swapped strides (virtual half-packing).
     act = x_2d.new_empty((rows, intermediate_size))
-    block_m = _gemm_block_m(rows)
-    block_n = min(_gemm_block_n(rows, intermediate_size), _MM1_ACC_MAX_ELEMS // block_m)
+    block_m, block_n, block_k = _stage_tiles(_MM1_TILES, rows, x.element_size())
     num_tiles = triton.cdiv(rows, block_m) * triton.cdiv(intermediate_size, block_n)
     _swiglu_gated_mlp_mm1_swiglu_kernel[(min(gemm_cores, num_tiles),)](
         x_2d, gate_weight, up_weight, act, rows, intermediate_size, hidden_size,
@@ -213,12 +216,13 @@ def swiglu_gated_mlp_fwd_impl(
 
     # Stage 2: down projection.
     out = x_2d.new_empty((rows, hidden_size))
-    num_tiles = triton.cdiv(rows, block_m) * triton.cdiv(hidden_size, _gemm_block_n(rows, hidden_size))
+    block_m, block_n, block_k = _stage_tiles(_MM2_TILES, rows, x.element_size())
+    num_tiles = triton.cdiv(rows, block_m) * triton.cdiv(hidden_size, block_n)
     _swiglu_gated_mlp_mm2_kernel[(min(gemm_cores, num_tiles),)](
         act, down_weight, out, rows, hidden_size, intermediate_size,
         act.stride(0), act.stride(1), down_weight.stride(1), down_weight.stride(0),
         out.stride(0), out.stride(1),
-        BLOCK_M=block_m, BLOCK_N=_gemm_block_n(rows, hidden_size), BLOCK_K=block_k,
+        BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_K=block_k,
     )
     return out.reshape(ori_shape)
 
