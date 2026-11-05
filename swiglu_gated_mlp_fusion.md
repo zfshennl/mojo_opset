@@ -25,8 +25,8 @@ y    = h @ Wd^T                 # [M,I] @ [I,H]  -> [M,H]
 | 层级 | 含义 | 参考实现（AscendC） | 当前实现（triton） | 可达目标（无平台修改） |
 |---|---|---|---|---|
 | L0 算子级 | 框架只见一个算子/一次调用 | ✅ 单 `SwigluGatedMlp` 算子 | ✅ custom op（compile/fake 遮蔽） | 保持 |
-| L1 launch 级 | device 发射次数 | fwd 3 次 | fwd 4 次（反向已移除） | **fwd 2 次** |
-| L2 访存级 | 中间量是否落 GM | gate_up、h 落 GM | gate/up/h/d_act 落 GM | **fwd 仅 act 落 GM** |
+| L1 launch 级 | device 发射次数 | fwd 3 次 | fwd 2 次（P0 已实施，每阶段一 kernel） | 已达成 |
+| L2 访存级 | 中间量是否落 GM | gate_up、h 落 GM | 仅 act 落 GM（P0 已实施） | 已达成 |
 | L3 片上级 | 跨核共享片上内存 | ✗ | ✗ | 平台依赖（见 §5.2） |
 
 ## 3. 参考实现的计算流
@@ -73,7 +73,7 @@ flowchart TD
 参考实现里唯一的"单 launch 全融合"是 `WG_MLP_STAGE_FUSED`（stage=104，仅 fp32，
 `swiglu_gated_mlp_impl.hpp:203-219`）：一个用 `GetValue/SetValue` 裸写的**标量三重循环**，
 复杂度 `O(M·H·I·O)`。对 glm-5.3 dense prefill（M=4096）约 3.8 PFLOP，是分阶段实现
-（约 3.7 TFLOP）的 **~1000 倍**——只能服务 toy 形状；其 tiling 中核数按行数封顶
+（6·M·H·I ≈ 1.86 TFLOP）的 **~2000 倍**——只能服务 toy 形状；其 tiling 中核数按行数封顶
 （`swiglu_gated_mlp_tiling.cpp:463-464`）也印证它只做行并行。
 
 **结论：参考实现的融合收益来自 ①算子级遮蔽 + ②gate/up 权重打包成单 GEMM + ③中间量最小化，
@@ -81,58 +81,59 @@ flowchart TD
 
 ## 4. 当前实现计算流
 
-当前实现把参考的"tiling-key stage"翻译成了 triton：每方向**一个 `@triton.jit` 入口**，
-`STAGE` 常量选择 GEMM stage（持久化 cube 核 `tl.dot`）或 SwiGLU stage（vector 核，UB 预算分块），
-host 按阶段序列 launch。
+P0 已实施：前向为**两个阶段 kernel、各一次 launch**（§6.2/§6.3 的方案）。历史的
+"单 jit 入口 + STAGE 选择、4 次 launch"版本已被替换。反向已移除（§4.2 为历史记录）。
 
-### 4.1 前向（4 次 launch，同一 kernel 入口）
+### 4.1 前向（P0 已实施：2 次 launch，每阶段一个 kernel）
 
 ```mermaid
 %%{init: {"theme": "default"}}%%
 flowchart TD
     X["x2d [M,H]"]
-    WG["Wg [I,H]"]
-    WU["Wu [I,H]"]
-    G["gate [M,I]  (GM)"]
-    U["up [M,I]  (GM)"]
-    HT["h [M,I]  (GM)"]
+    WG["Wg [I,H]（B 指针 1，虚拟半拼）"]
+    WU["Wu [I,H]（B 指针 2，虚拟半拼）"]
+    ACT["act [M,I] (GM，唯一中间量)"]
     WD["Wd [H,I]"]
     Y["y [M,H]"]
 
-    subgraph F1["launch 1 · STAGE_GEMM（cube 核）"]
-        K1["gate = x @ Wg^T"]
+    subgraph S1["stage 1 kernel: _swiglu_gated_mlp_mm1_swiglu_kernel（1 次 launch）<br/>双 tl.dot 累加器落 cube 核 + SwiGLU vec epilogue 自动派发 vector 核"]
+        K1["act = silu(clamp(x@Wg^T)) * clamp(x@Wu^T)"]
     end
-    subgraph F2["launch 2 · STAGE_GEMM（cube 核）"]
-        K2["up = x @ Wu^T"]
-    end
-    subgraph F3["launch 3 · STAGE_SWIGLU（vector 核）"]
-        K3["h = silu(clamp(gate)) * clamp(up)"]
-    end
-    subgraph F4["launch 4 · STAGE_GEMM（cube 核）"]
-        K4["y = h @ Wd^T"]
+    subgraph S2["stage 2 kernel: _swiglu_gated_mlp_mm2_kernel（1 次 launch，cube 核）"]
+        K2["y = act @ Wd^T"]
     end
 
     X --> K1
     WG --> K1
-    K1 -->|写 M·I| G
-    X --> K2
-    WU --> K2
-    K2 -->|写 M·I| U
-    G -->|读 M·I| K3
-    U -->|读 M·I| K3
-    K3 -->|写 M·I| HT
-    HT -->|读 M·I| K4
-    WD --> K4
-    K4 --> Y
+    WU --> K1
+    K1 -->|写 M·I| ACT
+    ACT -->|读 M·I| K2
+    WD --> K2
+    K2 --> Y
 
     classDef tensor fill:#eef2ff,stroke:#64748b,color:#1e293b
     classDef kernel fill:#dcfce7,stroke:#15803d,color:#14532d
-    class X,WG,WU,G,U,HT,WD,Y tensor
-    class K1,K2,K3,K4 kernel
+    class X,WG,WU,ACT,WD,Y tensor
+    class K1,K2 kernel
 ```
 
-前向中间量 GM 流量：`2·M·I`（MM1 写）`+ 2·M·I`（激活读）`+ M·I`（激活写）`+ M·I`（MM2 读）
-= **6·M·I**。glm-5.3 dense prefill（M=4096, I=12288, bf16）约 **604 MB**/次前向。
+前向中间量 GM 流量 **2·M·I**（act 写 + 读；gate/up 不落 GM）。glm-5.3 dense
+prefill（M=4096, I=12288, bf16）约 **201 MB**/次前向，为 P0 前（6·M·I ≈ 604 MB）的 1/3。
+两个阶段的 tile 配置**解耦**且由同一确定性规则计算（非 autotune），规则对齐 gmm
+`grouped_matmul_swiglu_quant_v2` 的 tiling 方法论，按 triton 语义映射：**BLOCK_M/N/K
+即 L1 级 tile 分配（A 片 + B 片），L0A/L0B/L0C 的细分由编译器完成、不建模**——
+1. **形状定 base**（对应 `CalBasicBlock`）：`BM=⌈rows⌉₂`（cap 128）、BN 取 cap
+   （stage-1 128 = 半拼 Wg|Wu 对上限，stage-2 256；stage-1 在 BM≤32 时窄化为 64，
+   双 B 片挤占 staging 的补偿）；2. **L1 预算填 K**（对应 `CalL1Depth` 的 depth 填满）：
+   `BK` 为 `(BM + num_B·BN)·BK·esize ≤ 预算` 内最大 2 的幂，预算 = L1/2
+   （950 L1=512KB，另一半留给编译器 K 循环 double-buffer；fp32 因 esize 翻倍自动折半）；3.
+   **decode 档**（对应小 M 路径门控）：rows≤16 走深 K（BK=512）窄 BN=64 的 GEMV 档。
+   不做 underfill 强拆（gmm 的 `ReSplitBaseN` 仅在同波数下优化尾波；fresh 实测强拆
+   从不取胜，如 mm2 rows=64 以 24/28 tiles 跑出最快 14µs）。经验约束：BN≥128 时
+   BK≤256（MLIR 编译失败），BK 全局 ≤512。实际档位：decode (16,64,512)；rows=64
+   stage-1 (64,128,256)、stage-2 (64,256,256)；rows≥128 stage-1 (128,128,256)、
+   stage-2 (128,256,256)。a2 孪生同规则、预算 = UB/2 = 96KB（A2 经 UB staging），
+   档位由预算模型给出（rows=64 档待真机验证）。
 
 ### 4.2 反向（已移除；历史设计为 9 次 launch，同一 kernel 入口）
 
@@ -269,6 +270,9 @@ module 层一次性打包（HF state-dict 加载后重排，反向边界处拆�
   → **一次 GEMM**，省掉 launch 6 及其 `+2·M·H` 的累积读+写；
 - bwd 的 gate/up 重算 → 一次。
 
+> **实施说明（P0）**：stage-1 kernel 直接接收 `Wg`/`Wu` 两个 B 指针（**虚拟半拼**），
+> 物理 `cat` 与 module 改造均不需要，HF 权重布局原样保留；其余打包收益均属反向，随反向暂缓。
+
 ### 6.2 MM1 epilogue 融合 SwiGLU（gate/up 不落 GM）
 
 打包权重**沿 N 半拼**：`Wpacked = cat([Wswish, Wlin])`（即参考实现的 `[W_act | W_gate]` 布局，
@@ -308,7 +312,7 @@ gate/up 从此不落 GM（前向）；数值上更贴 fp32 oracle（gate/up 不�
 vec 部分由编译器自动派发到 vector 核（vec 任务自动二分到两个 vec 核，triton 无感知）——已在本仓
 探针验证（附录）。这条路线已被 `ops-transformer/gmm` 的成品实现验证（见 §6.5）。
 
-### 6.3 目标前向（2 次 launch）
+### 6.3 目标前向（2 次 launch）——已实施
 
 ```mermaid
 %%{init: {"theme": "default"}}%%
@@ -339,11 +343,23 @@ flowchart TD
     class K1,K2 kernel
 ```
 
-| 指标 | 当前（4 launch） | 目标（2 launch） |
+| 指标 | P0 前（4 launch） | 实施后（2 launch） |
 |---|---|---|
 | 中间量 GM 流量 | 6·M·I ≈ 604 MB（M=4096 prefill） | **2·M·I ≈ 201 MB**（Δ≈403 MB/次前向，按 1.5–2 TB/s 约 200–270 µs） |
 | device launch | 4 | 2 |
 | gate/up 落 GM | 是 | 否 |
+
+实施：`mojo_opset/kernels/npu_a{2,5}_triton/swiglu_gated_mlp.py`——两个阶段 kernel
+（`_swiglu_gated_mlp_mm1_swiglu_kernel` / `_swiglu_gated_mlp_mm2_kernel`），tile 配置
+**按阶段解耦**、由 gmm 式确定性规则计算（形状定 base + L1/2 预算填 BK + decode 档；
+实际档位 a5 bf16：stage-1 decode (16,64,512) / rows=64 (64,128,256) / rows≥128
+(128,128,256)，stage-2 decode (16,64,512) / rows=64 (64,256,256) / rows≥128
+(128,256,256)；fp32 由预算自动折半，a2 同规则、预算 UB/2）。
+warm e2e 实测（950PR，bf16，vs 4-launch 旧版）：decode(M=1, 6144/12288) 681→**340 µs**
+（−50%）、shared(64×6144×2048) 109→**60 µs**（−45%）、prefill(512×4096×12288)
+746→**533 µs**（−29%）、prefill(512×6144×12288) 1049→**764 µs**（−27%）、
+full-batch(4096×4096×12288) **3548 µs**（超 torch-aclnn 组合 3982 µs 约 12%）、
+flash shared(512×4096×2048) **101 µs**（追平 torch 103.5 µs）。
 
 ### 6.4 目标反向（暂缓；曾规划 7 次 launch，或 6）
 
@@ -388,12 +404,13 @@ de-interleave 拆回），launch 6/7 可合并为 `dWgu = d_act^T @ x`，共 **6
 
 | 阶段 | 内容 | 依赖 | 收益 |
 |---|---|---|---|
-| P0 | 权重半拼 + 双累加器 epilogue 融合（§6.1–6.5） | 无（`gmm/grouped_matmul_swiglu_quant_v2` 成品实现佐证该路线） | fwd 4→2 launch、中间量流量 −67%；bwd 9→7/6 launch；数值更贴 fp32 oracle |
+| P0 | 权重半拼 + 双累加器 epilogue 融合（§6.1–6.5） | **已完成**：虚拟半拼（双 B 指针）+ 两阶段 kernel，fwd 4→2 launch | fwd 4→2 launch ✅、中间量流量 −67% ✅；数值更贴 fp32 oracle（gate/up 无 I/O 舍入） |
 | P1 | decode 专项：小 M 时 act 驻留片上的两段式 | 需跨核（MM2 归约仍跨核）→ 实际仍被平台卡住，暂缓 | — |
 | P2 | 单 launch 全融合（stage 间 grid barrier） | 平台：grid barrier + store 可见性 + 跨核片上共享（核型混合已由编译器自动完成，见 §5.2-#2） | 消灭 launch 与同步开销 |
 
 ### 附：实验与出处证据
 
+- P0 已实施：`mojo_opset/kernels/npu_a{2,5}_triton/swiglu_gated_mlp.py`（fwd 2 launch，虚拟半拼双 B 指针 + 双 `tl.dot` 累加器 + 自动派发 vec epilogue；**两阶段解耦的确定性 tile 规则**——gmm 式"形状定 base + L1 预算填 BK + decode 档"，对齐 grouped_matmul_swiglu_quant_v2 的 CalBasicBlock/CalL1Depth 方法论，BLOCK_M/N/K 按 L1 分配语义建模、L0 细分归编译器；950PR fresh 交错扫描校准，非 autotune）；
 - 平台特性（平台方确认，2026-11-04）：含 `tl.dot` 的 triton kernel，dot 指令必然在 cube 核执行；vec 计算由编译器自动派发到 vector 核，并将 vec 任务自动切分为两份分到两个 vec 核（triton 层无感知）。本仓探针复现：单 kernel 内**双 `tl.dot` 累加器 + SwiGLU vec epilogue（clamp/sigmoid/mul）一次 launch**，覆盖 decode(M=1)/prefill(M=512)/尾块(37×1024×768) × bf16/fp32/fp16 × clamp 开/关 全部数值正确（fp32 逐位一致，bf16 ~3e-3 为 I/O 舍入）；
 - gmm 半拼双 MMAD：`gmm/common/cgmct/kernel/kernel_gmm_swiglu_hif4quant.h:350-380`（左/右块 + `bRightOffsetStep_`）；FP32 swish epilogue：`gmm/common/cgmct/epilogue/block_epilogue_dequant_swiglu.h`；AIC↔AIV ping-pong：`gmm/common/cgmct/kernel/semaphore.h`；硬件 N 分裂：`gmm/common/cgmct/tile/copy_out/copy_out_split_n_with_params.h`；确定性声明：`gmm/grouped_matmul_swiglu_quant_v2/README.md`（"默认为确定性实现"）；
 - 参考 3-launch 展开：`op_host/op_api/swiglu_gated_mlp_l0.cpp:145-155`（`ExecMmOp` → `AddSwigluStage` → `ExecMmOp`）；
