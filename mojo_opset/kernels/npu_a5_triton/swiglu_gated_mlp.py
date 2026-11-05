@@ -53,6 +53,17 @@ Modifications for NPU architecture by triton-x team, 2025.
 #      190 us -- aclnn's 256x256 edge is its ASW/L2 scheduling, not the db).
 #      rows<=128 keeps the default buffers (dual accs 2*128*128*4*2 = 256 KiB
 #      exactly fits L0C with db).
+#      rows>128 + SMALL tile grids additionally wave-fit BN to 160 (aclnn's
+#      baseN=160 trick from swiglu_gated_mlp_gap_analysis_2048.md, legal
+#      since triton-ascend needs no pow2): scored as waves*cores/tiles with
+#      a 1.25 penalty when l0c=1 meets a long K loop (>16 iters -- the
+#      single-buffer serialization cost that lost at K=12288), switching
+#      only on a >=5% score win so near-100%-util large grids keep BN=128
+#      (measured: I=2048 grids 76%->93% util, mm1 66.4->62.1 and mm2
+#      35.3->33.0 us; I=12288 grids tie/lose and are correctly kept).
+#      BN=160 with the clamp epilogue is capped at BM=128 (128*160 = 20.5K
+#      elements is the largest clamp tile validated against the 248-KiB UB;
+#      256x128 = 32K overflows).
 #   2. K staging fills the tile budget exactly (their CalL1Depth): BK is
 #      budget // ((BM + num_b*BN) * esize), where num_b=2 for the dual-B
 #      stage-1 and 1 for stage-2. fp32 doubles esize, so BK halves
@@ -79,34 +90,62 @@ _BK_MIN = 16
 _WIDE_N_BK_MAX = 256  # BK cap when BN >= 128 (MLIR)
 _DECODE_ROWS = 16
 _BM_CAP = 128  # default BM cap; rows>128 raises it to 256 with BN=128
+_WAVEFIT_BN = 160  # aclnn-style non-pow2 N tile for small-grid wave fitting
+_WAVEFIT_L0C1_PENALTY = 1.25  # l0c=1 serialization cost on long K loops
+_WAVEFIT_MIN_GAIN = 0.95  # switch only on >=5% predicted win
 
 
 def _align16(value: int) -> int:
     return (value + 15) // 16 * 16
 
 
-def _stage_tiles(num_b: int, bn_cap: int, rows: int, n: int, k: int, esize: int, clamp_epilogue: bool = False):
-    """Deterministic per-stage (BM, BN, BK) with real values, gmm-style.
-
-    clamp_epilogue=True (stage 1 with swiglu_limit>0) keeps BM<=128: the
-    clamp/SwiGLU vector epilogue's UB working set scales with BM*BN and
-    256x128 fp32 chunks overflow UB (248 KiB) at compile time, while the
-    UB-legal 256x64 forms measure far slower (fresh: 478 vs 323 us).
-    """
+def _stage_tiles(num_b: int, bn_cap: int, rows: int, n: int, k: int, esize: int, cores: int = 28,
+                 clamp_epilogue: bool = False):
+    """Deterministic per-stage (BM, BN, BK, l0c_single_buffer), gmm-style."""
     # 3. decode profile first (rows <= 16): deepest legal K staging, BN=64.
     if rows <= _DECODE_ROWS:
         block_m, block_n = 16, 64
         per_k = (block_m + num_b * block_n) * esize
         block_k = min((_TILE_BUDGET_BYTES // per_k) & ~15, _BK_MAX, k & ~15 or _BK_MIN)
-        return block_m, block_n, max(block_k, _BK_MIN)
+        return block_m, block_n, max(block_k, _BK_MIN), False
 
     # 1. base blocks from the shape, at their real values (no rounding).
-    # rows>128 (clamp-free only): BM cap 256 with BN=128 (M-band halving).
-    block_m = min(rows, _BM_CAP if (rows <= _BM_CAP or clamp_epilogue) else 256)
-    if num_b > 1 and block_m <= 32:
-        bn_cap = min(bn_cap, 64)
-    elif rows > _BM_CAP and not clamp_epilogue:
+    if rows <= _BM_CAP:
+        block_m = min(rows, _BM_CAP)
+        if num_b > 1 and block_m <= 32:
+            bn_cap = min(bn_cap, 64)
+    elif clamp_epilogue and num_b > 1:
+        block_m = _BM_CAP  # clamp epilogue UB caps the tile area
+    else:
+        block_m = 256
+
+    l0c1 = num_b > 1 and block_m > 128  # wide dual-acc tiles need the single L0C buffer
+
+    if _BM_CAP < rows and n > _BK_MIN:
+        # Wave-fit BN in {128, 160} for small grids (see comment). BN=160
+        # needs l0c=1 (dual/single acc at 160 width no longer fits with db).
+        def tiles_of(bn):
+            return triton.cdiv(rows, block_m) * triton.cdiv(n, bn)
+
+        def score(bn, single):
+            waves = -(-tiles_of(bn) // cores)
+            iters = -(-k // _WIDE_N_BK_MAX)
+            penalty = _WAVEFIT_L0C1_PENALTY if single and iters > 16 else 1.0
+            return waves * cores / tiles_of(bn) * penalty
+
+        use_fit = (
+            score(_WAVEFIT_BN, True) < _WAVEFIT_MIN_GAIN * score(128, l0c1)
+            and block_m * _WAVEFIT_BN * num_b * 4 <= 256 * 1024  # accs fit single-buffered L0C
+            and not (clamp_epilogue and block_m * _WAVEFIT_BN > 128 * _WAVEFIT_BN)
+        )
+        if use_fit:
+            bn_cap = min(max(bn_cap, _WAVEFIT_BN), _WAVEFIT_BN)
+            l0c1 = True
+        else:
+            bn_cap = min(bn_cap, 128)
+    elif rows > _BM_CAP:
         bn_cap = min(bn_cap, 128)
+
     block_n = max(min(n, bn_cap), 16)
 
     # 2. exact budget fill for K staging (16-aligned, compiler pads+double
@@ -115,7 +154,7 @@ def _stage_tiles(num_b: int, bn_cap: int, rows: int, n: int, k: int, esize: int,
     block_k = min((_TILE_BUDGET_BYTES // per_k) & ~15, _BK_MAX, k & ~15 or _BK_MIN)
     if block_n >= 128:
         block_k = min(block_k, _WIDE_N_BK_MAX)
-    return block_m, block_n, max(block_k, _BK_MIN)
+    return block_m, block_n, max(block_k, _BK_MIN), l0c1
 
 
 @libentry()
@@ -265,13 +304,13 @@ def swiglu_gated_mlp_fwd_impl(
 
     # Stage 1: fused gate/up projections + SwiGLU (gate/up never hit GM).
     # B tiles address Wg^T / Wu^T through swapped strides (virtual half-packing).
-    # rows>128 tiles carry dual 256x128 fp32 accumulators = 256 KiB, so the
-    # L0C double buffer must be off for those (see tile-selection comment).
+    # rows>128 tiles carry 256-wide dual fp32 accumulators or a wave-fit
+    # BN=160 (see the tile-selection comment), needing the single L0C buffer.
     act = x_2d.new_empty((rows, intermediate_size))
-    block_m, block_n, block_k = _stage_tiles(
-        2, 128, rows, intermediate_size, hidden_size, x.element_size(), swiglu_limit > 0.0)
+    block_m, block_n, block_k, l0c1 = _stage_tiles(
+        2, 128, rows, intermediate_size, hidden_size, x.element_size(), gemm_cores, swiglu_limit > 0.0)
     num_tiles = triton.cdiv(rows, block_m) * triton.cdiv(intermediate_size, block_n)
-    mm1_kwargs = {"multibuffer_mode": {"gm": 2, "l1": 2, "l0c": 1, "ub": 2}} if block_m > 128 else {}
+    mm1_kwargs = {"multibuffer_mode": {"gm": 2, "l1": 2, "l0c": 1, "ub": 2}} if l0c1 else {}
     _swiglu_gated_mlp_mm1_swiglu_kernel[(min(gemm_cores, num_tiles),)](
         x_2d, gate_weight, up_weight, act, rows, intermediate_size, hidden_size,
         x_2d.stride(0), x_2d.stride(1), gate_weight.stride(1), gate_weight.stride(0),
@@ -282,13 +321,14 @@ def swiglu_gated_mlp_fwd_impl(
 
     # Stage 2: down projection.
     out = x_2d.new_empty((rows, hidden_size))
-    block_m, block_n, block_k = _stage_tiles(1, 256, rows, hidden_size, intermediate_size, x.element_size())
+    block_m, block_n, block_k, l0c1 = _stage_tiles(1, 256, rows, hidden_size, intermediate_size, x.element_size(), gemm_cores)
     num_tiles = triton.cdiv(rows, block_m) * triton.cdiv(hidden_size, block_n)
+    mm2_kwargs = {"multibuffer_mode": {"gm": 2, "l1": 2, "l0c": 1, "ub": 2}} if l0c1 else {}
     _swiglu_gated_mlp_mm2_kernel[(min(gemm_cores, num_tiles),)](
         act, down_weight, out, rows, hidden_size, intermediate_size,
         act.stride(0), act.stride(1), down_weight.stride(1), down_weight.stride(0),
         out.stride(0), out.stride(1),
-        BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_K=block_k,
+        BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_K=block_k, **mm2_kwargs,
     )
     return out.reshape(ori_shape)
 
