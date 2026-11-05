@@ -27,32 +27,70 @@ experts); glm-5.3-flash uses hidden 4096 with swiglu_limit=10.0.
 Modifications for NPU architecture by triton-x team, 2025.
 """
 
-# A5 tile tables, DECOUPLED per stage (rows-class -> (BM, BN, BK) for bf16;
-# fp32 halves BK, and halves BN when BM=128). Swept warm on 950PR: decode
-# (rows<=16) wants deep K steps (BK=512, narrow BN=64), large M wants wide
-# tiles with BK=256; stage 2 (single accumulator) goes wider than stage 1.
-_MM1_TILES = {
-    16: (16, 64, 512),
-    32: (32, 64, 256),
-    64: (64, 128, 128),
-    128: (128, 128, 256),
-}
-_MM2_TILES = {
-    16: (16, 64, 512),
-    32: (32, 128, 256),
-    64: (32, 128, 128),
-    128: (128, 256, 256),
-}
+# Tile selection follows the gmm (grouped_matmul_swiglu_quant_v2) tiling
+# methodology, mapped onto triton block semantics: triton BLOCK_M/N/K are the
+# L1-level tile allocation (per cube core), while the L0A/L0B/L0C split of a
+# tile is done by the compiler and is deliberately NOT modelled here.
+#   1. base blocks from the shape (their CalBasicBlock): BM/BN clamp to caps
+#      (BN stage-1 128 = the virtual half-packed Wg|Wu pair cap, stage-2 256);
+#      stage-1 additionally narrows BN to 64 for BM<=32 (the dual B tiles
+#      leave little L1 for width there; fresh-process sweeps: (32,64,512)
+#      beats (32,128,256) by ~2.5%, while stage-2 prefers the wide form).
+#   2. K staging fills the tile budget (their CalL1Depth): BK is the largest
+#      power of two with (BM*BK + num_b*BK*BN)*esize <= budget, where num_b=2
+#      for the dual-B stage-1 and 1 for stage-2. fp32 doubles esize, so BK
+#      halves automatically. Budget = L1/2: Ascend950 AIC L1 is 512 KiB
+#      (catlass arch.hpp) and the other half is left for the compiler's
+#      double buffering of the K loop.
+#   3. decode profile (their small-M path gating): rows<=16 is a GEMV whose
+#      cube pipe waits on the weight stream (measured MAC 13-16%), so it takes
+#      the deepest legal K staging with narrow BN=64.
+# No underfill resplit: like gmm's ReSplitBaseN (which only rebalances tails
+# at equal wave count), idle cores in a partial wave are tolerated -- fresh
+# sweeps show splitting BN to fill the grid never wins warm (e.g. mm2 rows=64
+# runs fastest at 24/28 tiles: 14 us vs 22 us for the split form).
+# Empirical MLIR constraint: BN>=128 with BK=512 fails to compile, so wide-N
+# tiles cap BK at 256; BK is capped at 512 overall (1024 unverified).
+_TILE_BUDGET_BYTES = 512 * 1024 // 2  # L1 (512 KiB) / 2, see above
+_BK_MAX = 512
+_WIDE_N_BK_MAX = 256  # BK cap when BN >= 128 (MLIR)
+_DECODE_ROWS = 16
 
 
-def _stage_tiles(tiles, rows: int, esize: int):
-    """Deterministic per-stage (BM, BN, BK) from the swept tables."""
-    key = 16 if rows <= 16 else 32 if rows <= 32 else 64 if rows <= 64 else 128
-    block_m, block_n, block_k = tiles[key]
-    if esize == 4:  # fp32 doubles tile bytes: halve K depth, cap the wide tiles
-        block_k //= 2
-        if block_m == 128:
-            block_n //= 2
+def _pow2_floor(value: int, floor: int) -> int:
+    result = floor
+    while result * 2 <= value:
+        result *= 2
+    return result
+
+
+def _pow2_ceil(value: int, cap: int) -> int:
+    result = 1
+    while result < value:
+        result *= 2
+    return min(result, cap)
+
+
+def _stage_tiles(num_b: int, bn_cap: int, rows: int, n: int, k: int, esize: int):
+    """Deterministic per-stage (BM, BN, BK), gmm-style (see comment above)."""
+    # 3. decode profile first (rows <= 16): deepest legal K staging, BN=64.
+    if rows <= _DECODE_ROWS:
+        block_m, block_n = 16, 64
+        block_k = _pow2_floor(_TILE_BUDGET_BYTES // ((block_m + num_b * block_n) * esize), 16)
+        return block_m, block_n, min(block_k, _BK_MAX, _pow2_floor(max(k, 16), 16))
+
+    # 1. base blocks from the shape (stage-1 narrows BN for small BM).
+    block_m = _pow2_ceil(rows, 128)
+    if num_b > 1 and block_m <= 32:
+        bn_cap = min(bn_cap, 64)
+    block_n = max(16, _pow2_floor(min(n, bn_cap), 16))
+
+    # 2. L1-budget K staging, then the empirical caps.
+    block_k = _pow2_floor(_TILE_BUDGET_BYTES // ((block_m + num_b * block_n) * esize), 16)
+    if block_n >= 128:
+        block_k = min(block_k, _WIDE_N_BK_MAX)
+    block_k = min(block_k, _BK_MAX, _pow2_floor(max(k, 16), 16))
+
     return block_m, block_n, block_k
 
 
@@ -204,7 +242,7 @@ def swiglu_gated_mlp_fwd_impl(
     # Stage 1: fused gate/up projections + SwiGLU (gate/up never hit GM).
     # B tiles address Wg^T / Wu^T through swapped strides (virtual half-packing).
     act = x_2d.new_empty((rows, intermediate_size))
-    block_m, block_n, block_k = _stage_tiles(_MM1_TILES, rows, x.element_size())
+    block_m, block_n, block_k = _stage_tiles(2, 128, rows, intermediate_size, hidden_size, x.element_size())
     num_tiles = triton.cdiv(rows, block_m) * triton.cdiv(intermediate_size, block_n)
     _swiglu_gated_mlp_mm1_swiglu_kernel[(min(gemm_cores, num_tiles),)](
         x_2d, gate_weight, up_weight, act, rows, intermediate_size, hidden_size,
@@ -216,7 +254,7 @@ def swiglu_gated_mlp_fwd_impl(
 
     # Stage 2: down projection.
     out = x_2d.new_empty((rows, hidden_size))
-    block_m, block_n, block_k = _stage_tiles(_MM2_TILES, rows, x.element_size())
+    block_m, block_n, block_k = _stage_tiles(1, 256, rows, hidden_size, intermediate_size, x.element_size())
     num_tiles = triton.cdiv(rows, block_m) * triton.cdiv(hidden_size, block_n)
     _swiglu_gated_mlp_mm2_kernel[(min(gemm_cores, num_tiles),)](
         act, down_weight, out, rows, hidden_size, intermediate_size,
