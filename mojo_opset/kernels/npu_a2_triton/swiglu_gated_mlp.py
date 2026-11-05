@@ -32,17 +32,20 @@ Modifications for NPU architecture by triton-x team, 2025.
 # per-core staging tile (on A2 the triton compiler stages dot tiles through
 # the 192 KiB UB, unlike the dedicated 512 KiB L1 on Ascend950), while the
 # L0A/L0B/L0C split of a tile is done by the compiler and is NOT modelled.
-#   1. base blocks from the shape (their CalBasicBlock): BM/BN clamp to caps
-#      (BN stage-1 128 = the virtual half-packed Wg|Wu pair cap, stage-2 128,
-#      conservative on A2); stage-1 additionally narrows BN to 64 for BM<=32
-#      (the dual B tiles leave little staging for width there; measured on
-#      950PR fresh-process sweeps, kept for the twin kernel).
-#   2. K staging fills the tile budget (their CalL1Depth): BK is the largest
-#      power of two with (BM*BK + num_b*BK*BN)*esize <= budget, where num_b=2
-#      for the dual-B stage-1 and 1 for stage-2. fp32 doubles esize, so BK
-#      halves automatically. Budget = UB/2 = 96 KiB (AtlasA2 UB is 192 KiB,
-#      catlass arch.hpp); the other half is left for the compiler's double
-#      buffering of the K loop.
+# triton-ascend does not require power-of-two or 16-aligned blocks, so all
+# three take REAL values (verified on 950PR for the twin kernel family).
+#   1. base blocks from the shape (their CalBasicBlock): BM = min(rows, 128)
+#      exactly (no rounding, no masked row waste), BN = min(N, cap) exactly
+#      (cap: stage-1 128 = the virtual half-packed Wg|Wu pair cap, stage-2
+#      128, conservative on A2); stage-1 additionally narrows BN to 64 for
+#      BM<=32 (the dual B tiles leave little staging for width there;
+#      measured on 950PR fresh-process sweeps, kept for the twin kernel).
+#   2. K staging fills the tile budget exactly (their CalL1Depth): BK is
+#      budget // ((BM + num_b*BN) * esize), where num_b=2 for the dual-B
+#      stage-1 and 1 for stage-2. fp32 doubles esize, so BK halves
+#      automatically. Budget = UB/2 = 96 KiB (AtlasA2 UB is 192 KiB, catlass
+#      arch.hpp); the other half is left for the compiler's double buffering
+#      of the K loop.
 #   3. decode profile (their small-M path gating): rows<=16 is a GEMV whose
 #      cube pipe waits on the weight stream, so it takes the deepest legal K
 #      staging with narrow BN=64.
@@ -51,49 +54,42 @@ Modifications for NPU architecture by triton-x team, 2025.
 # fresh sweeps: splitting BN to fill the grid never wins warm).
 # MLIR constraint inherited from the a5 sweeps: BN>=128 caps BK (at 128 here).
 # Unlike the a5 tables, these A2 tiles are derived from the budget model, not
-# from an on-device sweep: rows=64 picks (64,128,128)/(64,128,128) instead of
-# the halved guesses -- pending on-device validation.
+# from an on-device sweep: e.g. rows=64 picks (64,128,128)/(64,128,128)
+# instead of the halved guesses -- pending on-device validation. The budget
+# check uses 16-ALIGNED staging (the compiler pads tile dims and double
+# buffers the K loop; see the a5 twin for the on-device overflow evidence).
 _TILE_BUDGET_BYTES = 192 * 1024 // 2  # UB (192 KiB) / 2, see above
 _BK_MAX = 256
+_BK_MIN = 16
 _WIDE_N_BK_MAX = 128  # BK cap when BN >= 128
 _DECODE_ROWS = 16
 
 
-def _pow2_floor(value: int, floor: int) -> int:
-    result = floor
-    while result * 2 <= value:
-        result *= 2
-    return result
-
-
-def _pow2_ceil(value: int, cap: int) -> int:
-    result = 1
-    while result < value:
-        result *= 2
-    return min(result, cap)
+def _align16(value: int) -> int:
+    return (value + 15) // 16 * 16
 
 
 def _stage_tiles(num_b: int, bn_cap: int, rows: int, n: int, k: int, esize: int):
-    """Deterministic per-stage (BM, BN, BK), gmm-style (see comment above)."""
+    """Deterministic per-stage (BM, BN, BK) with real values, gmm-style."""
     # 3. decode profile first (rows <= 16): deepest legal K staging, BN=64.
     if rows <= _DECODE_ROWS:
         block_m, block_n = 16, 64
-        block_k = _pow2_floor(_TILE_BUDGET_BYTES // ((block_m + num_b * block_n) * esize), 16)
-        return block_m, block_n, min(block_k, _BK_MAX, _pow2_floor(max(k, 16), 16))
+        per_k = (block_m + num_b * block_n) * esize
+        block_k = min((_TILE_BUDGET_BYTES // per_k) & ~15, _BK_MAX, k & ~15 or _BK_MIN)
+        return block_m, block_n, max(block_k, _BK_MIN)
 
-    # 1. base blocks from the shape (stage-1 narrows BN for small BM).
-    block_m = _pow2_ceil(rows, 128)
+    # 1. base blocks from the shape, at their real values (no rounding).
+    block_m = min(rows, 128)
     if num_b > 1 and block_m <= 32:
         bn_cap = min(bn_cap, 64)
-    block_n = max(16, _pow2_floor(min(n, bn_cap), 16))
+    block_n = max(min(n, bn_cap), 16)
 
-    # 2. staging-budget K fill, then the caps.
-    block_k = _pow2_floor(_TILE_BUDGET_BYTES // ((block_m + num_b * block_n) * esize), 16)
+    # 2. exact budget fill for K staging (16-aligned), then the caps.
+    per_k = (_align16(block_m) + num_b * _align16(block_n)) * esize
+    block_k = min((_TILE_BUDGET_BYTES // per_k) & ~15, _BK_MAX, k & ~15 or _BK_MIN)
     if block_n >= 128:
         block_k = min(block_k, _WIDE_N_BK_MAX)
-    block_k = min(block_k, _BK_MAX, _pow2_floor(max(k, 16), 16))
-
-    return block_m, block_n, block_k
+    return block_m, block_n, max(block_k, _BK_MIN)
 
 
 @libentry()
