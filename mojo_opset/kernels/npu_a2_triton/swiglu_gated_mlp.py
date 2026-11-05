@@ -6,59 +6,28 @@ from mojo_opset.kernels._npu_triton_utils import get_num_cores
 from mojo_opset.kernels._npu_triton_utils import libentry
 
 """
-SwigluGatedMlp for NPU A2 (forward only), implementing the P0 fusion plan
-(swiglu_gated_mlp_fusion.md section 6): the forward is TWO stage kernels,
+SwigluGatedMlp for NPU A2 (forward only): two stage launches (P0 plan,
+swiglu_gated_mlp_fusion.md section 6).
 
-    stage 1 (one launch): act = silu(clamp(x @ Wg^T, max=L)) * clamp(x @ Wu^T, +-L)
-        Each output tile's K loop drives TWO tl.dot accumulators that share the
-        x tile loads; the SwiGLU vec epilogue is auto-dispatched to the vector
-        cores by the compiler (dot lands on the cube core), so the gate/up
-        projections never touch GM. Wg/Wu enter as two B pointers (virtual
-        half-packing; no physical concat, HF weight layout is kept as-is).
-    stage 2 (one launch): y = act @ Wd^T.
+    stage 1: act = silu(clamp(x @ Wg^T, max=L)) * clamp(x @ Wu^T, +-L)
+        One K loop drives two tl.dot accumulators sharing the x tile loads;
+        the SwiGLU epilogue runs on the vector cores of the same launch, so
+        gate/up never hit GM. Wg/Wu enter as two B pointers (virtual
+        half-packing; HF weight layout kept as-is).
+    stage 2: y = act @ Wd^T.
 
-    gate = x @ Wg^T;  up = x @ Wu^T
-    gate = gate.clamp(max=swiglu_limit);  up = up.clamp(+-swiglu_limit)   (Glm5NextTextMLP)
-    act = silu(gate) * up;  y = act @ Wd^T
-
-glm-5.3 uses hidden 6144 / intermediate 12288 (dense) and 2048 (shared
-experts); glm-5.3-flash uses hidden 4096 with swiglu_limit=10.0.
+Clamp follows Glm5NextTextMLP (swiglu_limit=0 disables; flash uses 10.0).
 
 Modifications for NPU architecture by triton-x team, 2025.
 """
 
-# Tile selection follows the gmm (grouped_matmul_swiglu_quant_v2) tiling
-# methodology, mapped onto triton block semantics: triton BLOCK_M/N/K are the
-# per-core staging tile (on A2 the triton compiler stages dot tiles through
-# the 192 KiB UB, unlike the dedicated 512 KiB L1 on Ascend950), while the
-# L0A/L0B/L0C split of a tile is done by the compiler and is NOT modelled.
-# triton-ascend does not require power-of-two or 16-aligned blocks, so all
-# three take REAL values (verified on 950PR for the twin kernel family).
-#   1. base blocks from the shape (their CalBasicBlock): BM = min(rows, 128)
-#      exactly (no rounding, no masked row waste), BN = min(N, cap) exactly
-#      (cap: stage-1 128 = the virtual half-packed Wg|Wu pair cap, stage-2
-#      128, conservative on A2); stage-1 additionally narrows BN to 64 for
-#      BM<=32 (the dual B tiles leave little staging for width there;
-#      measured on 950PR fresh-process sweeps, kept for the twin kernel).
-#   2. K staging fills the tile budget exactly (their CalL1Depth): BK is
-#      budget // ((BM + num_b*BN) * esize), where num_b=2 for the dual-B
-#      stage-1 and 1 for stage-2. fp32 doubles esize, so BK halves
-#      automatically. Budget = UB/2 = 96 KiB (AtlasA2 UB is 192 KiB, catlass
-#      arch.hpp); the other half is left for the compiler's double buffering
-#      of the K loop.
-#   3. decode profile (their small-M path gating): rows<=16 is a GEMV whose
-#      cube pipe waits on the weight stream, so it takes the deepest legal K
-#      staging with narrow BN=64.
-# No underfill resplit: like gmm's ReSplitBaseN (which only rebalances tails
-# at equal wave count), idle cores in a partial wave are tolerated (950PR
-# fresh sweeps: splitting BN to fill the grid never wins warm).
-# MLIR constraint inherited from the a5 sweeps: BN>=128 caps BK (at 128 here).
-# Unlike the a5 tables, these A2 tiles are derived from the budget model, not
-# from an on-device sweep: e.g. rows=64 picks (64,128,128)/(64,128,128)
-# instead of the halved guesses -- pending on-device validation. The budget
-# check uses 16-ALIGNED staging (the compiler pads tile dims and double
-# buffers the K loop; see the a5 twin for the on-device overflow evidence).
-_TILE_BUDGET_BYTES = 192 * 1024 // 2  # UB (192 KiB) / 2, see above
+# Tile selection, gmm-style: A2 stages dot tiles through the 192-KiB UB
+# (budget = UB/2); blocks take real (non-pow2) values. Budget-model derived,
+# pending on-device validation (evidence: a5 twin).
+#   decode rows<=16 -> (16, 64, deepest legal BK)
+#   base            -> BM=min(rows,128), BN=min(N,cap); BN=64 when BM<=32
+#   BK              -> budget//((BM+num_b*BN)*esize), 16-aligned
+_TILE_BUDGET_BYTES = 192 * 1024 // 2  # UB / 2
 _BK_MAX = 256
 _BK_MIN = 16
 _WIDE_N_BK_MAX = 128  # BK cap when BN >= 128
@@ -70,21 +39,18 @@ def _align16(value: int) -> int:
 
 
 def _stage_tiles(num_b: int, bn_cap: int, rows: int, n: int, k: int, esize: int):
-    """Deterministic per-stage (BM, BN, BK) with real values, gmm-style."""
-    # 3. decode profile first (rows <= 16): deepest legal K staging, BN=64.
+    """Deterministic per-stage (BM, BN, BK), gmm-style."""
     if rows <= _DECODE_ROWS:
         block_m, block_n = 16, 64
         per_k = (block_m + num_b * block_n) * esize
         block_k = min((_TILE_BUDGET_BYTES // per_k) & ~15, _BK_MAX, k & ~15 or _BK_MIN)
         return block_m, block_n, max(block_k, _BK_MIN)
 
-    # 1. base blocks from the shape, at their real values (no rounding).
     block_m = min(rows, 128)
     if num_b > 1 and block_m <= 32:
         bn_cap = min(bn_cap, 64)
     block_n = max(min(n, bn_cap), 16)
 
-    # 2. exact budget fill for K staging (16-aligned), then the caps.
     per_k = (_align16(block_m) + num_b * _align16(block_n)) * esize
     block_k = min((_TILE_BUDGET_BYTES // per_k) & ~15, _BK_MAX, k & ~15 or _BK_MIN)
     if block_n >= 128:
