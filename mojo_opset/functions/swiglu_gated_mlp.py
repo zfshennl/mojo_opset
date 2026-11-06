@@ -7,6 +7,8 @@ from ._dispatch import load_impl
 
 def _check_swiglu_gated_mlp(x, gate_weight, up_weight, down_weight, swiglu_limit):
     hidden_size = x.shape[-1]
+    if x.dtype not in (torch.float16, torch.bfloat16):
+        raise ValueError("swiglu_gated_mlp supports float16/bfloat16 only.")
     if x.dim() < 1:
         raise ValueError("swiglu_gated_mlp input must have at least one dimension.")
     if gate_weight.dim() != 2 or up_weight.dim() != 2 or down_weight.dim() != 2:
@@ -43,7 +45,8 @@ def swiglu_gated_mlp(
     over ``nn.Linear``-layout weights (``gate``/``up``: ``[intermediate, hidden]``,
     ``down``: ``[hidden, intermediate]``, no bias). ``swiglu_limit=0`` disables the
     clamp (glm-5.3: hidden 6144 / intermediate 12288); glm-5.3-flash (hidden 4096)
-    sets ``swiglu_limit=10.0``. Forward only — no backward is provided.
+    sets ``swiglu_limit=10.0``. float16/bfloat16 only; forward only — no backward
+    is provided.
     """
     _check_swiglu_gated_mlp(x, gate_weight, up_weight, down_weight, swiglu_limit)
     forward, _ = load_impl("swiglu_gated_mlp", implementation)

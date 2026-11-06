@@ -37,12 +37,9 @@ SWIGLU_MLP_LIMITS = [0.0, 10.0]
 WEIGHT_STD = 0.02
 
 # Chained-GEMM forward budgets. The kernel rounds its gate/up/h intermediates
-# at the I/O dtype while the fp32 oracle does not, and fp32 pre-images also
-# differ by GEMM accumulation order (torch vs tl.dot tiling). Values within
-# that noise of a rounding boundary snap to a different code point. fp32 keeps
-# the exact-equality contract.
+# at the I/O dtype while the fp32 oracle does not; values within that noise of
+# a rounding boundary snap to a different code point.
 SWIGLU_MLP_FORWARD_TOLERANCES = {
-    torch.float32: (None, None),
     torch.float16: (2**-6, 0.25),
     torch.bfloat16: (2**-6, 0.25),
 }
@@ -59,18 +56,17 @@ def _mlp_inputs(tokens, hidden, intermediate, dtype, device):
 
 def _reference_forward(x, gate_weight, up_weight, down_weight, swiglu_limit):
     """Independent oracle: the Glm5NextTextMLP forward with FP32 math."""
-    compute_dtype = torch.float32 if x.dtype in (torch.float16, torch.bfloat16) else x.dtype
-    x = x.to(compute_dtype)
-    gate = F.linear(x, gate_weight.to(compute_dtype))
-    up = F.linear(x, up_weight.to(compute_dtype))
+    x = x.to(torch.float32)
+    gate = F.linear(x, gate_weight.to(torch.float32))
+    up = F.linear(x, up_weight.to(torch.float32))
     if swiglu_limit > 0:
         gate = gate.clamp(max=swiglu_limit)
         up = up.clamp(min=-swiglu_limit, max=swiglu_limit)
-    return F.linear(F.silu(gate) * up, down_weight.to(compute_dtype))
+    return F.linear(F.silu(gate) * up, down_weight.to(torch.float32))
 
 
 @pytest.mark.api("functions.swiglu_gated_mlp")
-@pytest.mark.parametrize("dtype", (torch.float32, torch.bfloat16, torch.float16))
+@pytest.mark.parametrize("dtype", (torch.bfloat16, torch.float16))
 @pytest.mark.parametrize("limit", SWIGLU_MLP_LIMITS)
 @pytest.mark.parametrize("shape", SWIGLU_MLP_SHAPES)
 @pytest.mark.accuracy
@@ -90,7 +86,7 @@ def test_swiglu_gated_mlp_accuracy(accuracy_backend, dtype, limit, shape):
     "shape,limit",
     [((128, 512, 320), 0.0), ((128, 512, 320), 10.0), ((64, 4096, 2048), 10.0)],
 )
-@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
 @pytest.mark.bitwise
 def test_swiglu_gated_mlp_bitwise(accuracy_backend, dtype, shape, limit):
     implementation, _, device = accuracy_backend
@@ -162,6 +158,10 @@ def test_swiglu_gated_mlp_contracts(accuracy_backend):
         functions.swiglu_gated_mlp(x, mismatched, up, torch.randn(16, 8, device=device, dtype=torch.bfloat16),
                                    implementation=implementation)
     with pytest.raises(ValueError):
+        functions.swiglu_gated_mlp(x.to(torch.float32), gate.to(torch.float32), up.to(torch.float32),
+                                   torch.randn(16, 8, device=device, dtype=torch.float32),
+                                   implementation=implementation)
+    with pytest.raises(ValueError):
         functions.swiglu_gated_mlp(x, gate, up, torch.randn(16, 8, device=device, dtype=torch.bfloat16),
                                    swiglu_limit=-1.0, implementation=implementation)
 
@@ -169,7 +169,7 @@ def test_swiglu_gated_mlp_contracts(accuracy_backend):
 @pytest.mark.reference
 @pytest.mark.accuracy
 @pytest.mark.parametrize("limit", SWIGLU_MLP_LIMITS)
-@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
 def test_swiglu_gated_mlp_reference_matches_cpu_fp64(accuracy_backend, limit, dtype):
     # A CPU FP64 oracle catches vendor-specific dispatch bugs in the reference itself.
     device = accuracy_backend[2]

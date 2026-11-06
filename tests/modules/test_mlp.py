@@ -24,7 +24,6 @@ SWIGLU_MLP_MODULE_CASES = [
 WEIGHT_STD = 0.02
 
 SWIGLU_MLP_FORWARD_TOLERANCES = {
-    torch.float32: (None, None),
     torch.float16: (2**-6, 0.25),
     torch.bfloat16: (2**-6, 0.25),
 }
@@ -32,14 +31,13 @@ SWIGLU_MLP_FORWARD_TOLERANCES = {
 
 def _reference_forward(x, gate_weight, up_weight, down_weight, swiglu_limit):
     """Independent oracle: the Glm5NextTextMLP forward with FP32 math."""
-    compute_dtype = torch.float32 if x.dtype in (torch.float16, torch.bfloat16) else x.dtype
-    x = x.to(compute_dtype)
-    gate = F.linear(x, gate_weight.to(compute_dtype))
-    up = F.linear(x, up_weight.to(compute_dtype))
+    x = x.to(torch.float32)
+    gate = F.linear(x, gate_weight.to(torch.float32))
+    up = F.linear(x, up_weight.to(torch.float32))
     if swiglu_limit > 0:
         gate = gate.clamp(max=swiglu_limit)
         up = up.clamp(min=-swiglu_limit, max=swiglu_limit)
-    return F.linear(F.silu(gate) * up, down_weight.to(compute_dtype))
+    return F.linear(F.silu(gate) * up, down_weight.to(torch.float32))
 
 
 def _init_module(hidden, intermediate, limit, implementation, device, dtype):
@@ -54,7 +52,7 @@ def _init_module(hidden, intermediate, limit, implementation, device, dtype):
 @pytest.mark.api("modules.SwigluGatedMLP", ops=["swiglu_gated_mlp"])
 @pytest.mark.parametrize("hidden,intermediate", [case[1:] for case in SWIGLU_MLP_MODULE_CASES])
 @pytest.mark.parametrize("limit", [0.0, 10.0])
-@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
 @pytest.mark.accuracy
 def test_swiglu_gated_mlp_module_accuracy(accuracy_backend, hidden, intermediate, limit, dtype):
     implementation, target, device = accuracy_backend
