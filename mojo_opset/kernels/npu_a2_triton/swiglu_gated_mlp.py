@@ -165,6 +165,8 @@ def _swiglu_gated_mlp_mm2_kernel(
 
 
 def _check_swiglu_gated_mlp_inputs(x, gate_weight, up_weight, down_weight, swiglu_limit):
+    if x.dtype not in (torch.float16, torch.bfloat16):
+        raise ValueError("swiglu_gated_mlp supports float16/bfloat16 only.")
     if x.dim() < 1:
         raise ValueError("swiglu_gated_mlp input must have at least one dimension.")
     if gate_weight.dim() != 2 or up_weight.dim() != 2 or down_weight.dim() != 2:
