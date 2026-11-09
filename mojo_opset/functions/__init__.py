@@ -8,6 +8,7 @@ from .attention import native_swa_infer
 from .attention import swa
 from .attention import swa_infer
 from .attention import varlen_fa_infer
+from .build_flashinfer_mixed_sparse_indices import build_flashinfer_mixed_sparse_indices
 from .convolution import causal_conv1d
 from .convolution import causal_conv1d_update_state_infer
 from .flex_attention import flex_attention
@@ -64,6 +65,7 @@ from .swiglu import swiglu
 
 __all__ = [
     "apply_penalties_temperature",
+    "build_flashinfer_mixed_sparse_indices",
     "causal_conv1d",
     "causal_conv1d_update_state_infer",
     "dequant",

@@ -48,6 +48,7 @@ OPS = {
     "silu": "silu",
     "gelu": "gelu",
     "swiglu": "swiglu",
+    "build_flashinfer_mixed_sparse_indices": "build_flashinfer_mixed_sparse_indices",
     "rms_norm": "rmsnorm",
     "swa": "swa",
     "rope": "rope",

@@ -7,6 +7,7 @@ supported shapes, dtypes and options.
 | Function | `npu.a2` | `npu.a5` |
 | --- | --- | --- |
 | `apply_penalties_temperature` | triton | triton |
+| `build_flashinfer_mixed_sparse_indices` | triton | triton |
 | `causal_conv1d` | triton | triton |
 | `causal_conv1d_update_state_infer` | triton | triton |
 | `dequant` | triton | triton |
