@@ -1,5 +1,10 @@
 # SwiGLU Gated MLP 融合算子分析
 
+> **历史记录**：`swiglu_gated_mlp` 已重构为 `gmm_swiglu_quant`（去除第二次
+> mm、MXFP8 输入输出、融合量化，参考 ops-transformer
+> `gmm/grouped_matmul_swiglu_quant_v2`；A2 无 fp8 dot_scaled 支持已移除）。
+> 本文的双 dot 片上 epilogue、tile 预算模型与 C/V 派发结论被新算子继承。
+
 > 基线：`npu_kernels_dev` @ `3ccf5be`（`swiglu_gated_mlp`，triton-ascend 3.6.0 / Ascend 950PR）
 > 参考实现：`ops-transformer/experimental/ffn/swiglu_gated_mlp`（AscendC）
 > 模型场景：glm-5.3（H=6144, I=12288 dense / 2048 shared，无 clamp）、glm-5.3-flash（H=4096, I=12288 / 2048, swiglu_limit=10.0）

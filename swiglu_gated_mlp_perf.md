@@ -1,5 +1,10 @@
 # swiglu_gated_mlp 流水线占用报告（P0 后）
 
+> **历史记录**：`swiglu_gated_mlp` 已重构为 `gmm_swiglu_quant`（去除第二次
+> mm、MXFP8 输入输出、融合量化，参考 ops-transformer
+> `gmm/grouped_matmul_swiglu_quant_v2`；A2 无 fp8 dot_scaled 支持已移除）。
+> 本报告的 stage-1/tile 规则结论被新算子继承，mm2 部分不再适用。
+
 ## 环境
 
 | 项目 | 值 |
