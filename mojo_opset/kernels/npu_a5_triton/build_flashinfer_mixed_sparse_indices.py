@@ -47,6 +47,16 @@ def _remap_flashinfer_index(values, block_size, block_span):
     return tl.where(is_valid, values, -1)
 
 
+@triton.jit
+def _maybe_remap_flashinfer_index(values, block_size: tl.constexpr, block_span: tl.constexpr,
+                                  do_remap: tl.constexpr):
+    # span == block_size makes the remap an identity; skipping it saves a full
+    # div+mod per element (13% of the kernel on 957b, see the perf report).
+    if do_remap:
+        values = _remap_flashinfer_index(values, block_size, block_span)
+    return values
+
+
 @libentry()
 @triton.jit(
     do_not_specialize=[
@@ -55,11 +65,7 @@ def _remap_flashinfer_index(values, block_size, block_span):
         "decode_compressed_stride",
         "prefill_topk_stride",
         "swa_block_table_stride",
-        "swa_block_size",
-        "swa_block_span",
         "compressed_block_table_stride",
-        "compressed_block_size",
-        "compressed_block_span",
         "num_tokens",
         "NUM_DECODE_TOKENS",
         "PREFILL_TOPK_STRIDE",
@@ -83,12 +89,12 @@ def _build_flashinfer_mixed_sparse_indices_kernel(
     replay_start_ptr,
     swa_block_table_ptr,
     swa_block_table_stride,
-    swa_block_size,
-    swa_block_span,
+    swa_block_size: tl.constexpr,
+    swa_block_span: tl.constexpr,
     compressed_block_table_ptr,
     compressed_block_table_stride,
-    compressed_block_size,
-    compressed_block_span,
+    compressed_block_size: tl.constexpr,
+    compressed_block_span: tl.constexpr,
     num_tokens,
     NUM_DECODE_TOKENS,
     WINDOW_SIZE: tl.constexpr,
@@ -102,6 +108,10 @@ def _build_flashinfer_mixed_sparse_indices_kernel(
     HAS_DECODE_COMPRESSED_LENS: tl.constexpr,
     WINDOW_BLOCK_SIZE: tl.constexpr,
     TOPK_BLOCK_SIZE: tl.constexpr,
+    SWA_REMAP: tl.constexpr,
+    COMPRESSED_REMAP: tl.constexpr,
+    SWA_SCALAR_LOOKUP: tl.constexpr,
+    SWA_BLOCK_SPAN: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
     grid_size = tl.num_programs(axis=0)
@@ -117,7 +127,7 @@ def _build_flashinfer_mixed_sparse_indices_kernel(
                     mask=mask,
                     other=-1,
                 )
-                values = _remap_flashinfer_index(values, swa_block_size, swa_block_span)
+                values = _maybe_remap_flashinfer_index(values, swa_block_size, swa_block_span, SWA_REMAP)
                 tl.store(
                     sparse_indices_ptr + token_idx * sparse_indices_stride + offset,
                     values,
@@ -147,7 +157,9 @@ def _build_flashinfer_mixed_sparse_indices_kernel(
                     values = block_numbers * compressed_block_size + block_offsets
                     values = tl.where(is_valid, values, -1)
                     compressed_len += tl.sum((is_valid & token_valid).to(tl.int32), axis=0)
-                values = _remap_flashinfer_index(values, compressed_block_size, compressed_block_span)
+                values = _maybe_remap_flashinfer_index(
+                    values, compressed_block_size, compressed_block_span, COMPRESSED_REMAP
+                )
                 tl.store(
                     sparse_indices_ptr + token_idx * sparse_indices_stride + SWA_INDEX_WIDTH + offset,
                     values,
@@ -188,15 +200,32 @@ def _build_flashinfer_mixed_sparse_indices_kernel(
                 mask = offset < SWA_INDEX_WIDTH
                 pos_offset = swa_start_pos + offset
                 block_indices = pos_offset // swa_block_size
-                block_numbers = tl.load(
-                    swa_block_table_ptr + req_idx * swa_block_table_stride + block_indices,
-                    mask=mask & (offset < swa_len),
-                    other=-1,
-                )
+                if SWA_SCALAR_LOOKUP:
+                    # A window tile touches at most SWA_BLOCK_SPAN distinct
+                    # blocks: that many masked scalar loads on the SIMT path
+                    # beat a WINDOW_BLOCK_SIZE-lane indirect load (~27% of the
+                    # kernel on 957b, see the perf report).
+                    first_block = swa_start_pos // swa_block_size
+                    last_block = pos // swa_block_size
+                    block_numbers = tl.zeros((WINDOW_BLOCK_SIZE,), dtype=tl.int32)
+                    for b in tl.static_range(0, SWA_BLOCK_SPAN):
+                        valid = (first_block + b) <= last_block
+                        val = tl.load(
+                            swa_block_table_ptr + req_idx * swa_block_table_stride + first_block + b,
+                            mask=valid,
+                            other=0,
+                        )
+                        block_numbers += tl.where(block_indices == (first_block + b), val, 0)
+                else:
+                    block_numbers = tl.load(
+                        swa_block_table_ptr + req_idx * swa_block_table_stride + block_indices,
+                        mask=mask & (offset < swa_len),
+                        other=-1,
+                    )
                 block_offsets = pos_offset % swa_block_size
                 slot_ids = block_numbers * swa_block_size + block_offsets
                 slot_ids = tl.where(offset < swa_len, slot_ids, -1)
-                slot_ids = _remap_flashinfer_index(slot_ids, swa_block_size, swa_block_span)
+                slot_ids = _maybe_remap_flashinfer_index(slot_ids, swa_block_size, swa_block_span, SWA_REMAP)
                 tl.store(
                     sparse_indices_ptr + token_idx * sparse_indices_stride + offset,
                     slot_ids,
@@ -221,7 +250,9 @@ def _build_flashinfer_mixed_sparse_indices_kernel(
                 block_offsets = local_idx % compressed_block_size
                 slot_ids = block_numbers * compressed_block_size + block_offsets
                 slot_ids = tl.where((offset < topk_len) & is_valid, slot_ids, -1)
-                slot_ids = _remap_flashinfer_index(slot_ids, compressed_block_size, compressed_block_span)
+                slot_ids = _maybe_remap_flashinfer_index(
+                    slot_ids, compressed_block_size, compressed_block_span, COMPRESSED_REMAP
+                )
                 tl.store(
                     sparse_indices_ptr + token_idx * sparse_indices_stride + SWA_INDEX_WIDTH + offset,
                     slot_ids,
@@ -276,6 +307,9 @@ def build_flashinfer_mixed_sparse_indices_fwd(
 
     window_block_size = _ub_capped_block(swa_total_width)
     topk_block_size = _ub_capped_block(padded_topk)
+    # Distinct SWA blocks touched by one window tile; scalar lookups only pay
+    # off while this stays small (8 is conservative, DSV4.1 needs 3-5).
+    swa_block_span_tiles = window_block_size // swa_block_size + 2
 
     _build_flashinfer_mixed_sparse_indices_kernel[(get_num_cores("vector"),)](
         sparse_indices,
@@ -314,6 +348,10 @@ def build_flashinfer_mixed_sparse_indices_fwd(
         HAS_DECODE_COMPRESSED_LENS=has_decode_compressed_lens,
         WINDOW_BLOCK_SIZE=window_block_size,
         TOPK_BLOCK_SIZE=topk_block_size,
+        SWA_REMAP=swa_block_span != swa_block_size,
+        COMPRESSED_REMAP=compressed_block_span != compressed_block_size,
+        SWA_SCALAR_LOOKUP=swa_block_span_tiles <= 8,
+        SWA_BLOCK_SPAN=swa_block_span_tiles,
     )
     return sparse_indices, sparse_topk_lens
 
