@@ -17,6 +17,12 @@ def e8m0_to_scale(scale_bytes: torch.Tensor) -> torch.Tensor:
 def mxfp8_quantize(values: torch.Tensor):
     """Quantize ``[..., K]`` to MXFP8 (OCP scales): e4m3 data + e8m0 scales.
 
+    V3 numerics: values are rint-rounded (RNE) to BF16 first and the group
+    amax / element quantization run on that BF16 view; elements are then
+    quantized by one RTNE cast straight onto the fp8 grid (the reference
+    ``cast_E4M3FN,rint``), with an explicit +-448 clamp providing the
+    satfinite half of the OCP no-carry contract.
+
     Returns ``(data, scale_bytes)`` where data keeps the input shape and
     scale_bytes packs one e8m0 byte per 32 trailing elements as
     ``[..., ceil(K / 64), 2]`` (the unused byte of an odd final pair is 0),
@@ -24,7 +30,7 @@ def mxfp8_quantize(values: torch.Tensor):
     """
     shape = values.shape
     k = shape[-1]
-    v2 = values.to(torch.float32).reshape(-1, k)
+    v2 = values.to(torch.bfloat16).to(torch.float32).reshape(-1, k)
     pairs = -(-k // 64)
     pad = pairs * 2 * _MX_GROUP - v2.shape[1]
     if pad:
@@ -33,7 +39,7 @@ def mxfp8_quantize(values: torch.Tensor):
     amax = blocks.abs().amax(dim=-1)
     e = torch.where(amax > 0, torch.floor(torch.log2(amax)) - _E4M3_EMAX, torch.full_like(amax, -127.0))
     e = e.clamp_(min=-127.0)  # e8m0 encoding floor; keeps the byte cast in range
-    q = torch.round(blocks * torch.exp2(-e)[..., None]).clamp_(-_E4M3_MAX, _E4M3_MAX)
+    q = (blocks * torch.exp2(-e)[..., None]).clamp_(-_E4M3_MAX, _E4M3_MAX)
     data = q.reshape(q.shape[0], -1)[:, :k].to(torch.float8_e4m3fn).reshape(shape)
     scales = (e + 127.0).to(torch.uint8).reshape(*shape[:-1], pairs, 2)
     return data, scales

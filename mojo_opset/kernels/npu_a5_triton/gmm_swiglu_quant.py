@@ -162,6 +162,10 @@ def _gmm_swiglu_quant_kernel(
             lin = tl.minimum(tl.maximum(lin, -limit), limit)
         s = act * tl.sigmoid(act) * lin
         s = tl.where(n_mask[None, :], s, 0.0)  # tail cols must not inflate amax
+        # V3 quantizes the rint-rounded BF16 view of S (its V_j are BF16
+        # values); a cast round-trip is exact RNE on this build (evidence:
+        # scripts/gmm_swiglu_quant_cast_probe.py).
+        s = s.to(tl.bfloat16).to(tl.float32)
 
         # ---- MX dynamic quant, 32-element groups, OCP scale algorithm ----
         # e = floor(log2(amax)) - emax with emax = 8 (E4M3FN max 448); the
@@ -173,12 +177,13 @@ def _gmm_swiglu_quant_kernel(
         e = tl.where(amax > 0.0, tl.floor(tl.log2(amax)) - 8.0, -127.0)
         e = tl.maximum(e, -127.0)
         q = groups * tl.exp2(-e)[:, :, None]
-        # rint (round half to even) inlined: libdevice.rint crashes the AIC
-        # on this triton-ascend build, floor + parity does not.
-        q_floor = tl.floor(q)
-        q_frac = q - q_floor
-        q_odd = q_floor - 2.0 * tl.floor(q_floor * 0.5) > 0.5
-        q = q_floor + (q_frac > 0.5).to(tl.float32) + (q_odd & (q_frac == 0.5)).to(tl.float32)
+        # fp32 -> fp8 .to() is RTNE here (reference cast_E4M3FN,rint
+        # semantics: one rounding straight onto the fp8 grid), but it rounds
+        # onto the full [256, 512) grid and lands on the NaN code for values
+        # >= 464, so the explicit +-448 clamp provides the satfinite half of
+        # the OCP no-carry contract (evidence:
+        # scripts/gmm_swiglu_quant_cast_probe.py; libdevice.rint itself
+        # crashes the AIC, see scripts/gmm_swiglu_quant_rint_probe.py).
         q = tl.minimum(tl.maximum(q, -448.0), 448.0)
         y_ptrs = y + offs_m[:, None] * half_n + offs_n[None, :]
         tl.store(y_ptrs, q.reshape(BLOCK_M, BLOCK_N).to(y.dtype.element_ty),

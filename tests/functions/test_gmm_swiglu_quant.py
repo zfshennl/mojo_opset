@@ -35,11 +35,13 @@ GMM_SWIGLU_QUANT_LIMITS = [0.0, 10.0]
 # transformers GlmMoeDsaConfig.initializer_range.
 WEIGHT_STD = 0.02
 
-# One E4M3 rint half-step at the OCP head value ([256, 512) -> step 32) is
-# 16 * 2^e; the no-carry OCP scale can saturate a value up to 512 - 448 = 64
-# further steps; accumulation-order noise and amax scale-boundary flips are
-# covered by the remaining margin. Bound: |y * 2^e - S| <= 80 * 2^e + eps.
-_QUANT_STEP_BOUND = 80.0
+# V3 numerics bound, in units of the group scale 2^e: the BF16 intermediate
+# view rounds by <= 1 (half ULP of [256, 512)), one RTNE cast onto the fp8
+# grid adds <= 16 at the head binade, and the no-carry OCP scale saturates
+# up to 512 - 448 = 64 further steps; accumulation-order noise and amax
+# scale-boundary flips are covered by the remaining margin.
+# Bound: |y * 2^e - S| <= 82 * 2^e + eps.
+_QUANT_STEP_BOUND = 82.0
 
 
 def _quantize(value):
