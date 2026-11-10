@@ -173,3 +173,94 @@ prefill-topk 42/84。每 token = 128×SWA + 512×topk。
   workload 分会话采集（每 case 独立 msprof 目录）。
 - harness span 比 msprof Task Duration 系统性高 1–3 µs（插桩口径差异），两列均已给出。
 - A2 版本（npu_a2_triton）含相同逻辑与 192 KiB UB 预算，需 A2 主机补测。
+---
+
+# 复测：按 bound 分析落地优化（三项，a5/a2 同步修改）
+
+按上节"优化方向"实施（`mojo_opset/kernels/{npu_a2,npu_a5}_triton/build_flashinfer_mixed_sparse_indices.py`）：
+
+1. **恒等 remap 跳过**：`span == block_size` 时 remap 是恒等变换，新增 `SWA_REMAP /
+   COMPRESSED_REMAP` constexpr 开关直接跳过（本仓默认入参正是恒等；packed-page 仍走原路径）。
+2. **块大小 constexpr 化**：`swa/compressed_block_size/span` 由 `do_not_specialize` 运行时标量
+   改为 `tl.constexpr`，DSV4.1 的 64/32（2 的幂）使 div/mod 全部强度削减为移位/掩码；非 2 的幂
+   走 magic-multiply，同样远廉于运行时除法。
+3. **SWA 块表标量查找**：一个窗口 tile 至多触碰 `WINDOW_BLOCK_SIZE//bs+2`（DSV4.1 为 3–5）个
+   不同块——用该上界次带掩码的**标量** load（SIMT 通路）+ 逐 lane select 取代 128 lane 间接读；
+   `SWA_SCALAR_LOOKUP` 在上界 ≤8 时启用（保 exotic 配置回退到间接读）。上界由
+   `first_block..last_block=pos//bs` 掩码保证不越界。
+
+验证：31 个功能测试全过（含 packed-page span 变体，覆盖 remap 开/关两路径）；每个优化均先在
+knockout 试验台确认输出与生产 kernel 逐位一致。
+
+```sh
+# v3 = 优化 1+2；v4 = 再叠加优化 3（最终）
+ASCEND_RT_VISIBLE_DEVICES=6 pytest tests/performance/functions/test_build_flashinfer_mixed_sparse_indices.py \
+       --perf-l2-flush --perf-trace-dir <traces_v3|traces_v4> \
+       --perf-output tests/performance/results/build_flashinfer_mixed_sparse_indices_opt<1|2>_triton.json
+```
+
+## 新结果（kernel span 中位，µs）
+
+| Case | v1 基线 | v3（1+2） | v4（+3，最终） | v4 msprof | v1→v4 | v4 e2e |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `decode_ratio0` | 7.3 | 6.8 | 7.6 | 7.0 | +4%（噪声） | 64.5 |
+| `decode_ratio1` | 13.3 | 9.9 | 10.3 | 8.5 | **−22%** | 76.3 |
+| `decode_ratio2` | 13.5 | 10.1 | 10.7 | 9.0 | **−21%** | 75.7 |
+| `spec_decode_ratio1` | 27.2 | 17.6 | 17.8 | 14.1 | **−35%** | 81.9 |
+| `mixed_ratio1` | 122.4 | 64.5 | 48.2 | 45.9 | **−61%** | 106.5 |
+| `mixed_ratio2` | 122.9 | 64.2 | 48.8 | 46.5 | **−60%** | 117.2 |
+| `prefill_ratio1` | 130.6 | 70.9 | 53.4 | 48.7 | **−59%** | 119.4 |
+| `long_chunk_ratio2` | 127.1 | 67.1 | 50.5 | 48.7 | **−60%** | 124.8 |
+
+（`decode_ratio0` 无 prefill SWA 段，优化 3 不适用，±0.4 µs 属 run-to-run 噪声；decode 路径
+其余收益来自 1+2。e2e：mixed 192 → 107–117 µs。）
+
+三项优化的实测增益与 knockout 预估对照：1+2 合计 −46%（预估外推 −40%）；3 再 −25%
+（knockout 单测 −27%）。生产口径 mixed/prefill 从 ~121–131 µs 降至 ~46–49 µs。
+
+## 优化后的管线与利用率（msprof，最终版）
+
+| Case | dur µs | vec | scalar | mte2 | mte3 | cycles/列 | 隐含发射 eq/列 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `mixed_ratio1` | 45.9 | 92% | 61% | 21% | 64% | 1.57 | 197 |
+| `mixed_ratio2` | 46.5 | 92% | 61% | 21% | 64% | 1.59 | 199 |
+| `prefill_ratio1` | 48.7 | 90% | 59% | 19% | 60% | 1.62 | 197 |
+| `long_chunk_ratio2` | 48.7 | 92% | 59% | 20% | 60% | 1.60 | 203 |
+| `spec_decode_ratio1` | 14.1 | 71% | 55% | 25% | 55% | 2.17 | 242 |
+
+cycles/列 4.3 → 1.6（除法/恒等 remap 消除后发射量减半以上）；标量通路占用升到 ~60%
+（SWA 块表标量查找落在 SIMT，与 vec 并行——正是优化 3 的机制）。
+
+## 优化后的 MBU / MFU
+
+优化后数学流改变（恒等 remap 消除、div/mod→shift），按下表"实际发射模型"（shift/掩码计 1、
+i64 gather 索引 8、reduce 2）重估；数据量口径不变：
+
+| Case | 数据量 | 有效带宽 | **MBU** | ALU-eq（发射模型） | **MFU** |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `decode_ratio0` | 389 KB | 57 GB/s | 4.1% | 32,768 | 0.04% |
+| `decode_ratio1` | 1.51 MiB | 185 GB/s | 13.2% | 3,178,496 | 3.1% |
+| `decode_ratio2` | 1.51 MiB | 176 GB/s | 12.6% | 3,178,496 | 3.0% |
+| `spec_decode_ratio1` | 3.81 MiB | 283 GB/s | 20.2% | 9,531,648 | 5.7% |
+| `mixed_ratio1` | 17.66 MiB | 403 GB/s | **28.8%** | 57,622,528 | 10.6% |
+| `mixed_ratio2` | 17.66 MiB | 398 GB/s | **28.4%** | 57,622,528 | 10.5% |
+| `prefill_ratio1` | 18.03 MiB | 388 GB/s | **27.7%** | 59,765,248 | 10.4% |
+| `long_chunk_ratio2` | 18.04 MiB | 388 GB/s | **27.7%** | 59,765,248 | 10.3% |
+
+（发射模型每列 ALU-eq：prefill-SWA 26——含 SWA 标量查找的 4×(cmp+sel+add)；prefill-topk 22、
+decode-topk 24——各含 i64 gather 索引 8；decode-SWA ≈1（remap 已跳过）。）
+
+- **MBU 10.6% → 27.7–28.8%**：有效带宽 ~400 GB/s 已接近该行粒度访问模式的实测流式率
+  （knockout floormem ≈ 422 GB/s）。
+- MFU（÷11.83 T 标定峰值）≈ 10%：数学发射模型 ~26 eq/列 vs 隐含 ~200 eq/列——**剩余 ~87%
+  的发射量在 topk 段间接读**（`triton_indirect_load` + i64 索引），这是下一个、也是最后一个
+  大头。备选方案实测：整行广播比较+求和的"行 gather"更慢（133.8 µs vs 64.3 µs，已否决）；
+  `tl.gather` 寄存器 gather 的 NPU 降级未验证，留待后续。
+- vec 占用 90–92%：核仍在向量发射受限状态运行，但单步成本已降至 1.6 cycles/列。
+
+## 复测说明
+
+- 31 个功能测试全部通过；v3/v4 各 8 个 perf case 全部通过。
+- a2 双胞胎文件同步修改（仅 UB_BYTES/namespace 不同，diff 校验一致）；A2 上板数据待 A2 主机补测。
+- 块大小 constexpr 化的代价：每 distinct (swa_bs, span, cbs, span) 组合一次 JIT 编译
+  （DSV4.1 全层仅 2–3 个组合，triton 缓存后无重编译开销）。
