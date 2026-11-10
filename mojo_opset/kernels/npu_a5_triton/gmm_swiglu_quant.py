@@ -88,9 +88,6 @@ def _gmm_swiglu_quant_kernel(
     M, N, K,
     limit,
     HAS_LIMIT: tl.constexpr,
-    EVEN_M: tl.constexpr,
-    EVEN_N: tl.constexpr,
-    EVEN_K: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -145,39 +142,13 @@ def _gmm_swiglu_quant_kernel(
             kb = k * (BLOCK_K // 32) + offs_kb
             k_mask = offs_k < k_left
             kb_mask = kb < k_blocks
-            # Masked fp8/matmul_mx loads lower to alloc + zero-fill + copy
-            # staging on this backend, ~18x slower than direct loads
-            # (evidence: scripts/gmm_swiglu_quant_variants_bench.py); take
-            # the unmasked path whenever the shape aligns the tile.
-            if EVEN_K:
-                if EVEN_M:
-                    x_tile = tl.load(x_ptrs)
-                else:
-                    x_tile = tl.load(x_ptrs, mask=m_mask[:, None], other=0.0)
-                if EVEN_M:
-                    xs_tile = tl.load(xs_base + kb[None, :])
-                else:
-                    xs_tile = tl.load(xs_base + kb[None, :], mask=m_mask[:, None], other=0)
-            else:
-                x_tile = tl.load(x_ptrs, mask=m_mask[:, None] & k_mask[None, :], other=0.0)
-                xs_tile = tl.load(xs_base + kb[None, :], mask=m_mask[:, None] & kb_mask[None, :], other=0)
+            x_tile = tl.load(x_ptrs, mask=m_mask[:, None] & k_mask[None, :], other=0.0)
+            xs_tile = tl.load(xs_base + kb[None, :], mask=m_mask[:, None] & kb_mask[None, :], other=0)
             ws_ptr = kb[None, :] * N
-            if EVEN_K:
-                if EVEN_N:
-                    w1_tile = tl.load(w1_ptrs)
-                    w2_tile = tl.load(w2_ptrs)
-                    ws1_tile = tl.load(ws_base + ws_ptr)
-                    ws2_tile = tl.load(ws_base + half_n + ws_ptr)
-                else:
-                    w1_tile = tl.load(w1_ptrs, mask=n_mask[None, :], other=0.0)
-                    w2_tile = tl.load(w2_ptrs, mask=n_mask[None, :], other=0.0)
-                    ws1_tile = tl.load(ws_base + ws_ptr, mask=n_mask[:, None], other=0)
-                    ws2_tile = tl.load(ws_base + half_n + ws_ptr, mask=n_mask[:, None], other=0)
-            else:
-                w1_tile = tl.load(w1_ptrs, mask=k_mask[:, None] & n_mask[None, :], other=0.0)
-                w2_tile = tl.load(w2_ptrs, mask=k_mask[:, None] & n_mask[None, :], other=0.0)
-                ws1_tile = tl.load(ws_base + ws_ptr, mask=n_mask[:, None] & kb_mask[None, :], other=0)
-                ws2_tile = tl.load(ws_base + half_n + ws_ptr, mask=n_mask[:, None] & kb_mask[None, :], other=0)
+            w1_tile = tl.load(w1_ptrs, mask=k_mask[:, None] & n_mask[None, :], other=0.0)
+            w2_tile = tl.load(w2_ptrs, mask=k_mask[:, None] & n_mask[None, :], other=0.0)
+            ws1_tile = tl.load(ws_base + ws_ptr, mask=n_mask[:, None] & kb_mask[None, :], other=0)
+            ws2_tile = tl.load(ws_base + half_n + ws_ptr, mask=n_mask[:, None] & kb_mask[None, :], other=0)
             acc_act = tl.dot_scaled(x_tile, xs_tile, "e4m3", w1_tile, ws1_tile, "e4m3", acc=acc_act)
             acc_lin = tl.dot_scaled(x_tile, xs_tile, "e4m3", w2_tile, ws2_tile, "e4m3", acc=acc_lin)
             x_ptrs += BLOCK_K
@@ -190,8 +161,7 @@ def _gmm_swiglu_quant_kernel(
             act = tl.minimum(act, limit)
             lin = tl.minimum(tl.maximum(lin, -limit), limit)
         s = act * tl.sigmoid(act) * lin
-        if not EVEN_N:
-            s = tl.where(n_mask[None, :], s, 0.0)  # tail cols must not inflate amax
+        s = tl.where(n_mask[None, :], s, 0.0)  # tail cols must not inflate amax
 
         # ---- MX dynamic quant, 32-element groups, OCP scale algorithm ----
         # e = floor(log2(amax)) - emax with emax = 8 (E4M3FN max 448); the
@@ -211,19 +181,13 @@ def _gmm_swiglu_quant_kernel(
         q = q_floor + (q_frac > 0.5).to(tl.float32) + (q_odd & (q_frac == 0.5)).to(tl.float32)
         q = tl.minimum(tl.maximum(q, -448.0), 448.0)
         y_ptrs = y + offs_m[:, None] * half_n + offs_n[None, :]
-        if EVEN_M and EVEN_N:
-            tl.store(y_ptrs, q.reshape(BLOCK_M, BLOCK_N).to(y.dtype.element_ty))
-        else:
-            tl.store(y_ptrs, q.reshape(BLOCK_M, BLOCK_N).to(y.dtype.element_ty),
-                     mask=m_mask[:, None] & n_mask[None, :])
+        tl.store(y_ptrs, q.reshape(BLOCK_M, BLOCK_N).to(y.dtype.element_ty),
+                 mask=m_mask[:, None] & n_mask[None, :])
         offs_g = tl.arange(0, BLOCK_N // 32)
         g_start = pid_n * BLOCK_N + offs_g * 32  # first column of each MX group
         ys_ptrs = y_scale + offs_m[:, None] * (i_pairs * 2) + g_start[None, :] // 32
-        if EVEN_M and EVEN_N:
-            tl.store(ys_ptrs, (e + 127.0).to(tl.int32).to(tl.uint8))
-        else:
-            tl.store(ys_ptrs, (e + 127.0).to(tl.int32).to(tl.uint8),
-                     mask=m_mask[:, None] & (g_start[None, :] < half_n))
+        tl.store(ys_ptrs, (e + 127.0).to(tl.int32).to(tl.uint8),
+                 mask=m_mask[:, None] & (g_start[None, :] < half_n))
 
 
 def _repack_weight_scale(weight_scale, transposed=False):
@@ -311,7 +275,6 @@ def gmm_swiglu_quant_fwd_impl(
         x_2d, weight, x_scale, weight_scale, y, y_scale,
         rows, n, k,
         float(swiglu_limit), swiglu_limit > 0.0,
-        rows % block_m == 0, inter % block_n == 0, k % block_k == 0,
         BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_K=block_k,
     )
     return y, y_scale
