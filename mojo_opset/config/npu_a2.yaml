@@ -46,7 +46,6 @@ npu.a2:
   sdpa_infer: triton
   silu: triton
   static_quant: triton
-  swiglu_gated_mlp: triton
   store_lowrank: triton
   store_paged_kv_cache: triton
   swa: triton

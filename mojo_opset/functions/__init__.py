@@ -22,6 +22,7 @@ from .gelu import gelu
 from .gemm import group_gemm
 from .gemm import quant_batch_gemm_reduce_sum
 from .gemm import quant_gemm
+from .gmm_swiglu_quant import gmm_swiglu_quant
 from .indexer import indexer
 from .indexer import lightning_indexer
 from .kv_cache import store_paged_kv_cache
@@ -60,7 +61,6 @@ from .sdpa import diffusion_attention
 from .sdpa import sdpa_infer
 from .silu import silu
 from .store_lowrank import store_lowrank
-from .swiglu_gated_mlp import swiglu_gated_mlp
 from .swiglu import swiglu
 
 __all__ = [
@@ -77,6 +77,7 @@ __all__ = [
     "flex_attention",
     "flex_attention_v2",
     "gelu",
+    "gmm_swiglu_quant",
     "group_gemm",
     "group_rms_norm_infer",
     "indexer",
@@ -113,11 +114,10 @@ __all__ = [
     "silu",
     "static_quant",
     "store_lowrank",
-    "swiglu_gated_mlp",
+    "swiglu",
     "store_paged_kv_cache",
     "swa",
     "swa_infer",
-    "swiglu",
     "top_k_sampling",
     "top_p_filter",
     "top_p_sampling",

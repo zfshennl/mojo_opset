@@ -2,13 +2,15 @@ import pytest
 import torch
 
 from mojo_opset import functions
+from mojo_opset.kernels.torch.gmm_swiglu_quant import mxfp8_quantize
+from mojo_opset.kernels.torch.gmm_swiglu_quant import mxfp8_quantize_weight
 
 
-# SwigluGatedMlp workloads at the glm-5.3 / glm-5.3-flash model shapes:
+# GmmSwigluQuant workloads at the glm-5.3 / glm-5.3-flash model shapes:
 # dense MLP layers use intermediate_size=12288 with hidden 6144 (glm-5.3,
 # GlmMoeDsaMLP) or 4096 (glm-5.3-flash, Glm5NextTextMLP with
 # swiglu_limit=10.0); shared experts use moe_intermediate_size=2048.
-@pytest.mark.api("functions.swiglu_gated_mlp", ops=["swiglu_gated_mlp"])
+@pytest.mark.api("functions.gmm_swiglu_quant", ops=["gmm_swiglu_quant"])
 @pytest.mark.parametrize(
     "tokens,hidden,intermediate,limit",
     [
@@ -22,24 +24,28 @@ from mojo_opset import functions
         (512, 4096, 2048, 10.0),  # glm-5.3-flash shared experts prefill
     ],
 )
-def test_swiglu_gated_mlp(benchmark, perf_environment, tokens, hidden, intermediate, limit):
+def test_gmm_swiglu_quant(benchmark, perf_environment, tokens, hidden, intermediate, limit):
     _, device, _, implementation = perf_environment
 
     def factory():
-        x = torch.randn(tokens, hidden, device=device, dtype=torch.bfloat16)
-        weights = []
-        for shape in ((intermediate, hidden), (intermediate, hidden), (hidden, intermediate)):
-            weight = torch.empty(shape, device=device, dtype=torch.bfloat16)
-            torch.nn.init.normal_(weight, 0, 0.02)  # GlmMoeDsaConfig.initializer_range
-            weights.append(weight)
-        inputs = (x, *weights)
-        return lambda: functions.swiglu_gated_mlp(*inputs, swiglu_limit=limit, implementation=implementation)
+        x, x_scale = mxfp8_quantize(torch.randn(tokens, hidden, device=device))
+        weight, weight_scale = mxfp8_quantize_weight(
+            torch.randn(hidden, 2 * intermediate, device=device) * 0.02  # GlmMoeDsaConfig.initializer_range
+        )
+        inputs = (
+            x,
+            weight.view(1, hidden, 2 * intermediate),
+            weight_scale.view(1, -1, 2 * intermediate, 2),
+            x_scale,
+            torch.tensor([tokens], dtype=torch.int64, device=device),
+        )
+        return lambda: functions.gmm_swiglu_quant(*inputs, swiglu_limit=limit, implementation=implementation)
 
     benchmark(
         factory=factory,
-        op="swiglu_gated_mlp",
+        op="gmm_swiglu_quant",
         shape=[tokens, hidden, intermediate],
-        dtype="bfloat16",
+        dtype="float8e4m3fn",
         phase="forward",
         swiglu_limit=limit,
     )

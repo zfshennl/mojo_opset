@@ -11,24 +11,24 @@ from .convolution import CausalConv1dUpdateStateInfer
 from .fused_quantization import DequantSwiGLUQuant
 from .fused_quantization import LayerNormQuant
 from .fused_quantization import MoEDynamicQuant
-from .fused_quantization import RMSNormQuant
 from .fused_quantization import ResidualAddLayerNormQuant
 from .fused_quantization import ResidualAddRMSNormQuant
+from .fused_quantization import RMSNormQuant
 from .gemm import GroupGemm
 from .gemm import QuantBatchGemmReduceSum
 from .gemm import QuantGemm
+from .gmm_swiglu_quant import GmmSwigluQuant
 from .indexer import Indexer
 from .indexer import LightningIndexer
 from .kv_cache import StorePagedKVCache
-from .mlp import SwigluGatedMLP
 from .multimodal_rope_infer import MultimodalRoPEInfer
 from .multimodal_rope_infer import MultimodalRoPEInplaceInfer
 from .normalization import GroupRMSNormInfer
 from .normalization import LayerNormInfer
-from .normalization import RMSNorm
-from .normalization import RMSNormInfer
 from .normalization import ResidualAddLayerNormInfer
 from .normalization import ResidualAddRMSNormInfer
+from .normalization import RMSNorm
+from .normalization import RMSNormInfer
 from .over_encoding import NF4DequantEmbedding
 from .over_encoding import OverEncoding
 from .over_encoding import OverEncodingNGram
@@ -62,6 +62,7 @@ __all__ = [
     "DequantSwiGLUQuant",
     "DynamicQuant",
     "GELU",
+    "GmmSwigluQuant",
     "GroupGemm",
     "GroupRMSNormInfer",
     "Indexer",

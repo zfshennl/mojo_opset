@@ -51,7 +51,7 @@ OPS = {
     "rms_norm": "rmsnorm",
     "swa": "swa",
     "rope": "rope",
-    "swiglu_gated_mlp": "swiglu_gated_mlp",
+    "gmm_swiglu_quant": "gmm_swiglu_quant",
 }
 
 # Add only differences once specialized wrappers exist, for example:
