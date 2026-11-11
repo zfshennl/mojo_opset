@@ -35,7 +35,7 @@ def test_gmm_swiglu_quant(benchmark, perf_environment, tokens, hidden, intermedi
         inputs = (
             x,
             weight.view(1, hidden, 2 * intermediate),
-            weight_scale.view(1, -1, 2 * intermediate, 2),
+            weight_scale.view(1, 2 * intermediate, -1),
             x_scale,
             torch.tensor([tokens], dtype=torch.int64, device=device),
         )

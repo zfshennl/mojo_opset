@@ -55,7 +55,7 @@ def _gmm_inputs(tokens, hidden, intermediate, device):
         torch.randn(hidden, 2 * intermediate, device=device) * WEIGHT_STD
     )
     group_list = torch.tensor([tokens], dtype=torch.int64, device=device)
-    return x, weight.view(1, hidden, 2 * intermediate), weight_scale.view(1, -1, 2 * intermediate, 2), \
+    return x, weight.view(1, hidden, 2 * intermediate), weight_scale.view(1, 2 * intermediate, -1), \
         x_scale, group_list
 
 
@@ -69,7 +69,7 @@ def _reference_silu_half(x, weight, x_scale, weight_scale, swiglu_limit):
     n = weight.shape[-1]
     inter = n // 2
     xs = _decode_e8m0(x_scale.reshape(rows, -1))
-    ws = _decode_e8m0(weight_scale.reshape(-1, n, 2)).transpose(1, 2).reshape(-1, n)
+    ws = _decode_e8m0(weight_scale.reshape(n, -1)).t()
     xd = x.reshape(rows, k).to(torch.float32) * xs.repeat_interleave(32, dim=1)[:, :k]
     wd = weight.reshape(k, n).to(torch.float32) * ws.repeat_interleave(32, dim=0)[:k, :]
     c = xd @ wd
@@ -108,7 +108,7 @@ def test_gmm_swiglu_quant_accuracy(accuracy_backend, limit, shape):
 
     assert y.dtype is torch.float8_e4m3fn and y.shape == expected.shape
     assert y_scale.dtype is torch.uint8 and y_scale.shape == (
-        shape[0], (shape[2] + 63) // 64, 2,
+        shape[0], (shape[2] + 31) // 32,
     )
     _assert_quantized_close(y, y_scale, expected)
 
@@ -136,7 +136,7 @@ def test_gmm_swiglu_quant_fake_metadata(accuracy_backend, limit):
         pytest.skip("NPU A5 Triton fake metadata")
     preload("gmm_swiglu_quant", implementation="triton", target=target)
     ops = getattr(torch.ops, f"mojo_npu_triton_{target.split('.')[1]}")
-    inputs = _gmm_inputs(14, 32, 16, device)  # K/I tails inside one scale pair
+    inputs = _gmm_inputs(14, 32, 16, device)  # K/I tails inside one scale block
     torch.library.opcheck(ops.gmm_swiglu_quant_fwd.default, (*inputs, limit), test_utils=("test_faketensor",))
 
 
@@ -178,7 +178,7 @@ def test_gmm_swiglu_quant_contracts(accuracy_backend):
                                    implementation=implementation)
     with pytest.raises(ValueError):  # odd N has no SwiGLU halves
         functions.gmm_swiglu_quant(x, weight[..., :63].contiguous(),
-                                   weight_scale[..., :63, :].contiguous(), x_scale, group_list,
+                                   weight_scale[..., :63].contiguous(), x_scale, group_list,
                                    implementation=implementation)
     with pytest.raises(ValueError):  # e8m0 carriers are uint8/int8 only
         functions.gmm_swiglu_quant(x, weight, weight_scale.float(), x_scale, group_list,
@@ -205,9 +205,7 @@ def test_gmm_swiglu_quant_reference_matches_cpu_fp64(accuracy_backend, limit):
     x64 = cpu_inputs[0].to(torch.float64)
     w64 = cpu_inputs[1].to(torch.float64).reshape(hidden, 2 * intermediate)
     xs64 = _decode_e8m0(cpu_inputs[3].to(torch.float64)).reshape(tokens, -1)
-    ws64 = _decode_e8m0(cpu_inputs[2].to(torch.float64))
-    k_pairs = (hidden + 63) // 64
-    ws64 = ws64.view(k_pairs, 2 * intermediate, 2).transpose(1, 2).reshape(k_pairs * 2, 2 * intermediate)
+    ws64 = _decode_e8m0(cpu_inputs[2].to(torch.float64)).reshape(2 * intermediate, -1).t()
     xd = x64 * xs64.repeat_interleave(32, dim=1)[:, :hidden]
     wd = w64 * ws64.repeat_interleave(32, dim=0)[:hidden, :]
     c = xd @ wd
