@@ -24,35 +24,35 @@ def mxfp8_quantize(values: torch.Tensor):
     satfinite half of the OCP no-carry contract.
 
     Returns ``(data, scale_bytes)`` where data keeps the input shape and
-    scale_bytes packs one e8m0 byte per 32 trailing elements as
-    ``[..., ceil(K / 64), 2]`` (the unused byte of an odd final pair is 0),
-    matching the gmm grouped_matmul_swiglu_quant_v2 scale packing.
+    scale_bytes is ``[..., ceil(K / 32)]``: one e8m0 byte per 32 trailing
+    elements, K-groups innermost (axis order mirrors the data tensor).
     """
     shape = values.shape
     k = shape[-1]
     v2 = values.to(torch.bfloat16).to(torch.float32).reshape(-1, k)
-    pairs = -(-k // 64)
-    pad = pairs * 2 * _MX_GROUP - v2.shape[1]
+    blocks = -(-k // 32)
+    pad = blocks * _MX_GROUP - v2.shape[1]
     if pad:
         v2 = F.pad(v2, (0, pad))
-    blocks = v2.reshape(-1, pairs * 2, _MX_GROUP)
-    amax = blocks.abs().amax(dim=-1)
+    blocks_t = v2.reshape(-1, blocks, _MX_GROUP)
+    amax = blocks_t.abs().amax(dim=-1)
     e = torch.where(amax > 0, torch.floor(torch.log2(amax)) - _E4M3_EMAX, torch.full_like(amax, -127.0))
     e = e.clamp_(min=-127.0)  # e8m0 encoding floor; keeps the byte cast in range
-    q = (blocks * torch.exp2(-e)[..., None]).clamp_(-_E4M3_MAX, _E4M3_MAX)
+    q = (blocks_t * torch.exp2(-e)[..., None]).clamp_(-_E4M3_MAX, _E4M3_MAX)
     data = q.reshape(q.shape[0], -1)[:, :k].to(torch.float8_e4m3fn).reshape(shape)
-    scales = (e + 127.0).to(torch.uint8).reshape(*shape[:-1], pairs, 2)
+    scales = (e + 127.0).to(torch.uint8).reshape(*shape[:-1], blocks)
     return data, scales
 
 
 def mxfp8_quantize_weight(values: torch.Tensor):
     """MXFP8-quantize a ``[K, N]`` weight with 32-element groups along K.
 
-    Returns ``(data [K, N], scale_bytes [ceil(K/64), N, 2])`` matching the
-    gmm_swiglu_quant weight_scale packing (per-32-K, per-column e8m0).
+    Returns ``(data [K, N], scale_bytes [N, ceil(K/32)])``: N-major — each
+    column's K-group scales are contiguous, the orientation tl.dot_scaled's
+    ``[N, K // 32]`` rhs_scale tiles consume directly (zero transposes).
     """
     data, scales = mxfp8_quantize(values.t())
-    return data.t().contiguous(), scales.transpose(0, 1).contiguous()
+    return data.t().contiguous(), scales.contiguous()
 
 
 def gmm_swiglu_quant_fwd(
@@ -74,14 +74,13 @@ def gmm_swiglu_quant_fwd(
     rows = x.numel() // k
     n = weight.shape[-1]
     inter = n // 2
-    k_pairs = -(-k // 64)
+    k_blocks = -(-k // 32)
 
     x2 = x.reshape(rows, k).to(torch.float32)
     w2 = weight.reshape(k, n).to(torch.float32)
-    # x_scale [rows, kp, 2] -> logical per-32-block scale [rows, kp*2].
-    xs = e8m0_to_scale(x_scale.reshape(rows, k_pairs * 2))
-    # weight_scale [kp, n, 2] -> logical per-32-block per-column [kp*2, n].
-    ws = e8m0_to_scale(weight_scale.reshape(k_pairs, n, 2)).transpose(1, 2).reshape(k_pairs * 2, n)
+    # x_scale [rows, kb] (row-major); weight_scale [N, kb] (N-major).
+    xs = e8m0_to_scale(x_scale.reshape(rows, k_blocks))
+    ws = e8m0_to_scale(weight_scale.reshape(n, k_blocks)).t()
 
     c = (x2 * xs.repeat_interleave(_MX_GROUP, dim=1)[:, :k]) @ (
         w2 * ws.repeat_interleave(_MX_GROUP, dim=0)[:k, :]

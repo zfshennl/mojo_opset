@@ -15,8 +15,8 @@ class GmmSwigluQuant(torch.nn.Module):
     ``swiglu_limit=0`` disables the clamp, glm-5.3-flash uses 10.0). Owns
     the fused dense-expert weight as non-trainable buffers — ``weight``
     ``[1, hidden_size, 2*intermediate_size]`` float8_e4m3fn (first N half
-    feeds the sigmoid branch) and ``weight_scale`` e8m0 ``[1,
-    ceil(hidden_size/64), 2*intermediate_size, 2]`` — quantized at init
+    feeds the sigmoid branch) and ``weight_scale`` e8m0 ``[1, 2*intermediate_size,
+    ceil(hidden_size/32)]`` (N-major) — quantized at init
     from the ``GlmMoeDsaConfig.initializer_range`` scale. ``forward``
     takes pre-quantized activations ``(x, x_scale)`` and returns
     ``(y, y_scale)`` for the next quantized GEMM.
@@ -37,7 +37,7 @@ class GmmSwigluQuant(torch.nn.Module):
         # groups run along K, so the fused weight is quantized per column.
         data, scales = mxfp8_quantize_weight(torch.randn(hidden_size, n, device=device) * 0.02)
         self.register_buffer("weight", data.view(1, hidden_size, n))
-        self.register_buffer("weight_scale", scales.view(1, -1, n, 2))
+        self.register_buffer("weight_scale", scales.view(1, n, -1))
         self.swiglu_limit = swiglu_limit
         self.implementation = implementation
 

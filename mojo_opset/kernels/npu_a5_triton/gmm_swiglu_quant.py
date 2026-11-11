@@ -4,7 +4,6 @@ import triton.language as tl
 
 from mojo_opset.kernels._npu_triton_utils import get_num_cores
 from mojo_opset.kernels._npu_triton_utils import libentry
-from mojo_opset.kernels._weight_cache import PreparedWeightCache
 
 """
 GmmSwigluQuant for NPU A5 (forward only): one fused launch. The former
@@ -18,14 +17,15 @@ semantics, 950PR MX path):
     y, y_scale = MX quant of S             (OCP: e = floor(log2 amax) - 8,
                                             32-element groups, e8m0 scales)
 
-I/O (all contiguous; the wrapper repacks weight_scale once per live weight
-into the contiguous [k_blocks, N] layout the kernel consumes):
+I/O (all contiguous; one e8m0 byte per 32 K elements, no pair packing;
+x/y scales are row-major, weight_scale is N-major so rhs_scale tiles load
+in the [BN, BK // 32] orientation tl.dot_scaled consumes, zero transposes):
     x           [M, K]         float8_e4m3fn
     weight      [1, K, N]      float8_e4m3fn   (N = 2I; first half = act)
-    x_scale     [M, cdiv(K,64), 2]       uint8 e8m0, per 32 K elements
-    weight_scale[1, cdiv(K,64), N, 2]    uint8 e8m0, per 32 K per column
+    x_scale     [M, ceil(K/32)]          uint8 e8m0
+    weight_scale[1, N, ceil(K/32)]       uint8 e8m0
     y           [M, I]         float8_e4m3fn
-    y_scale     [M, cdiv(I,64), 2]       uint8 e8m0
+    y_scale     [M, ceil(I/32)]          uint8 e8m0
 
 One K loop drives two tl.dot_scaled accumulators sharing the x tile loads
 (the two B pointers address the two N halves of one weight tensor, virtual
@@ -101,8 +101,7 @@ def _gmm_swiglu_quant_kernel(
     pid = tl.program_id(axis=0)
     num_cores = tl.num_programs(axis=0)
     half_n = N // 2
-    k_pairs = tl.cdiv(K, 64)
-    i_pairs = tl.cdiv(half_n, 64)
+    i_blocks = tl.cdiv(half_n, 32)
     k_blocks = tl.cdiv(K, 32)
     num_pid_m = tl.cdiv(M, BLOCK_M)
     num_pid_n = tl.cdiv(half_n, BLOCK_N)
@@ -122,40 +121,42 @@ def _gmm_swiglu_quant_kernel(
         m_mask = offs_m < M
         n_mask = offs_n < half_n
 
-        x_ptrs = x + offs_m[:, None] * K + offs_k[None, :]
-        xs_base = x_scale + offs_m[:, None] * (k_pairs * 2)
-        # First half (act) at column n, second half (lin) at column n + I.
-        w1_ptrs = weight + offs_k[:, None] * N + offs_n[None, :]
-        w2_ptrs = w1_ptrs + half_n
-        # weight_scale arrives repacked by the host as contiguous
-        # [N, k_blocks]: byte (n, kb) at n * k_blocks + kb, so each rhs_scale
-        # tile row [BN, BK // 32] is a contiguous byte run. The k-major
-        # [k_blocks, N] layout forces a strided N-gather + transpose onto the
-        # AIV vector pipe and saturates it (~6.2 ms @ 4096-6144-12288);
-        # N-major drops the whole kernel onto the load path
-        # (scripts/gmm_swiglu_quant_variants_bench.py, msprof op evidence).
-        ws_base = weight_scale + offs_n[:, None] * (k_pairs * 2)
-        ws2_base = ws_base + half_n * (k_pairs * 2)
-
         acc_act = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
         acc_lin = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+        # All addresses are recomputed in-loop from affine offsets (no pointer
+        # stepping). weight_scale is N-major [N, k_blocks]: the rhs_scale tile
+        # loads directly as [BN, BK // 32] (rows n-contiguous along kb) —
+        # exactly the orientation tl.dot_scaled's rhs_scale contract wants,
+        # no runtime transpose anywhere.
         for k in range(0, tl.cdiv(K, BLOCK_K)):
-            kb = k * (BLOCK_K // 32) + offs_kb
-            k_left = K - k * BLOCK_K
+            k_ofs = k * BLOCK_K
+            k_left = K - k_ofs
             k_mask = offs_k < k_left
+            kb = k_ofs // 32 + offs_kb
             kb_mask = kb < k_blocks
-            x_tile = tl.load(x_ptrs, mask=m_mask[:, None] & k_mask[None, :], other=0.0)
-            xs_tile = tl.load(xs_base + kb[None, :], mask=m_mask[:, None] & kb_mask[None, :], other=0)
-            ws_ptr = kb[None, :]
-            w1_tile = tl.load(w1_ptrs, mask=k_mask[:, None] & n_mask[None, :], other=0.0)
-            w2_tile = tl.load(w2_ptrs, mask=k_mask[:, None] & n_mask[None, :], other=0.0)
-            ws1_tile = tl.load(ws_base + ws_ptr, mask=n_mask[:, None] & kb_mask[None, :], other=0)
-            ws2_tile = tl.load(ws2_base + ws_ptr, mask=n_mask[:, None] & kb_mask[None, :], other=0)
-            acc_act = tl.dot_scaled(x_tile, xs_tile, "e4m3", w1_tile, ws1_tile, "e4m3", acc=acc_act)
-            acc_lin = tl.dot_scaled(x_tile, xs_tile, "e4m3", w2_tile, ws2_tile, "e4m3", acc=acc_lin)
-            x_ptrs += BLOCK_K
-            w1_ptrs += BLOCK_K * N
-            w2_ptrs += BLOCK_K * N
+            x_tile = tl.load(
+                x + offs_m[:, None] * K + (k_ofs + offs_k)[None, :],
+                mask=m_mask[:, None] & k_mask[None, :], other=0.0)
+            xs_tile = tl.load(
+                x_scale + offs_m[:, None] * k_blocks + kb[None, :],
+                mask=m_mask[:, None] & kb_mask[None, :], other=0)
+            w1_tile = tl.load(
+                weight + (k_ofs + offs_k)[:, None] * N + offs_n[None, :],
+                mask=k_mask[:, None] & n_mask[None, :], other=0.0)
+            # Second half (lin) at column n + I.
+            w2_tile = tl.load(
+                weight + (k_ofs + offs_k)[:, None] * N + (half_n + offs_n)[None, :],
+                mask=k_mask[:, None] & n_mask[None, :], other=0.0)
+            ws1_tile = tl.load(
+                weight_scale + offs_n[:, None] * k_blocks + kb[None, :],
+                mask=n_mask[:, None] & kb_mask[None, :], other=0)
+            ws2_tile = tl.load(
+                weight_scale + (half_n + offs_n)[:, None] * k_blocks + kb[None, :],
+                mask=n_mask[:, None] & kb_mask[None, :], other=0)
+            acc_act = tl.dot_scaled(x_tile, xs_tile, "e4m3", w1_tile,
+                                    ws1_tile, "e4m3", acc=acc_act)
+            acc_lin = tl.dot_scaled(x_tile, xs_tile, "e4m3", w2_tile,
+                                    ws2_tile, "e4m3", acc=acc_lin)
 
         act = acc_act
         lin = acc_lin
@@ -192,25 +193,9 @@ def _gmm_swiglu_quant_kernel(
                  mask=m_mask[:, None] & n_mask[None, :])
         offs_g = tl.arange(0, BLOCK_N // 32)
         g_start = pid_n * BLOCK_N + offs_g * 32  # first column of each MX group
-        ys_ptrs = y_scale + offs_m[:, None] * (i_pairs * 2) + g_start[None, :] // 32
+        ys_ptrs = y_scale + offs_m[:, None] * i_blocks + g_start[None, :] // 32
         tl.store(ys_ptrs, (e + 127.0).to(tl.int32).to(tl.uint8),
                  mask=m_mask[:, None] & (g_start[None, :] < half_n))
-
-
-def _repack_weight_scale(weight_scale, transposed=False):
-    """(1, kp, N, 2) pair packing -> contiguous (N, 2 * kp) for the kernel.
-
-    N-major makes each rhs_scale tile row a contiguous byte run (same layout
-    as the x_scale rows); k-major ([2 * kp, N]) forces an N-strided gather +
-    transpose onto the AIV vector pipe and saturates it (see kernel comment).
-    Padded tail bytes (K not a multiple of 64) are masked out in-kernel.
-    """
-    del transposed
-    kp, n = weight_scale.shape[1], weight_scale.shape[2]
-    return weight_scale.view(kp, n, 2).transpose(1, 2).reshape(2 * kp, n).t().contiguous()
-
-
-_prepare_weight_scale = PreparedWeightCache(_repack_weight_scale)
 
 
 def _check_gmm_swiglu_quant_inputs(x, weight, weight_scale, x_scale, group_list, swiglu_limit):
@@ -227,16 +212,17 @@ def _check_gmm_swiglu_quant_inputs(x, weight, weight_scale, x_scale, group_list,
     n = weight.shape[2]
     if n % 2:
         raise ValueError("gmm_swiglu_quant weight N must be even (two SwiGLU halves).")
-    k_pairs = (k + 63) // 64
-    if weight_scale.shape != (1, k_pairs, n, 2) or weight_scale.dtype not in (torch.uint8, torch.int8):
+    k_blocks = (k + 31) // 32
+    if weight_scale.dim() != 3 or weight_scale.shape != (1, n, k_blocks) \
+            or weight_scale.dtype not in (torch.uint8, torch.int8):
         raise ValueError(
-            f"gmm_swiglu_quant weight_scale must be uint8/int8 e8m0 of shape [1, {k_pairs}, {n}, 2], "
+            f"gmm_swiglu_quant weight_scale must be uint8/int8 e8m0 of shape [1, {n}, {k_blocks}] (N-major), "
             f"got {tuple(weight_scale.shape)} {weight_scale.dtype}."
         )
-    if x_scale.dim() != 3 or x_scale.shape[0] != rows or x_scale.shape[1:] != (k_pairs, 2) \
+    if x_scale.dim() != 2 or x_scale.shape != (rows, k_blocks) \
             or x_scale.dtype not in (torch.uint8, torch.int8):
         raise ValueError(
-            f"gmm_swiglu_quant x_scale must be uint8/int8 e8m0 of shape [{rows}, {k_pairs}, 2], "
+            f"gmm_swiglu_quant x_scale must be uint8/int8 e8m0 of shape [{rows}, {k_blocks}], "
             f"got {tuple(x_scale.shape)} {x_scale.dtype}."
         )
     if group_list.dtype != torch.int64 or group_list.numel() != 1:
@@ -274,12 +260,12 @@ def gmm_swiglu_quant_fwd_impl(
         weight_scale = weight_scale.view(torch.uint8)
     if x_scale.dtype is not torch.uint8:
         x_scale = x_scale.view(torch.uint8)
-    # One cached repack per live weight: the interleaved reference packing
-    # halves the MX dot rate in-kernel (see _repack_weight_scale).
-    weight_scale = _prepare_weight_scale(weight_scale.contiguous(), transposed=False).view(-1)
+    # weight_scale flows to the kernel in its raw API pair packing
+    # [kp, N, 2] (zero-copy dtype view only, same as x_scale).
+    weight_scale = weight_scale.contiguous().view(torch.uint8).view(-1)
 
     y = x_2d.new_empty((rows, inter), dtype=torch.float8_e4m3fn)
-    y_scale = x_2d.new_zeros((rows, triton.cdiv(inter, 64), 2), dtype=torch.uint8)
+    y_scale = x_2d.new_zeros((rows, triton.cdiv(inter, 32)), dtype=torch.uint8)
     gemm_cores = get_num_cores("cube")
 
     block_m, block_n, block_k = _stage_tiles(rows, inter, k, gemm_cores)
@@ -316,10 +302,10 @@ def _gmm_swiglu_quant_fwd_fake(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     rows = x.numel() // x.shape[-1]
     inter = weight.shape[2] // 2
-    pairs = -(-inter // 64)
+    blocks = -(-inter // 32)
     return (
         torch.empty((rows, inter), dtype=torch.float8_e4m3fn, device=x.device,
                     memory_format=torch.contiguous_format),
-        torch.empty((rows, pairs, 2), dtype=torch.uint8, device=x.device,
+        torch.empty((rows, blocks), dtype=torch.uint8, device=x.device,
                     memory_format=torch.contiguous_format),
     )

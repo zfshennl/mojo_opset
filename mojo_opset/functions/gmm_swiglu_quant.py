@@ -20,17 +20,17 @@ def _check_gmm_swiglu_quant(x, weight, weight_scale, x_scale, group_list, swiglu
     n = weight.shape[2]
     if n % 2:
         raise ValueError("gmm_swiglu_quant weight N must be even (two SwiGLU halves).")
-    k_pairs = (hidden_size + 63) // 64
-    if weight_scale.dtype not in (torch.uint8, torch.int8) or weight_scale.dim() != 4 \
-            or weight_scale.shape != (1, k_pairs, n, 2):
+    k_blocks = (hidden_size + 31) // 32
+    if weight_scale.dtype not in (torch.uint8, torch.int8) or weight_scale.dim() != 3 \
+            or weight_scale.shape != (1, n, k_blocks):
         raise ValueError(
-            f"gmm_swiglu_quant weight_scale must be uint8/int8 e8m0 of shape [1, {k_pairs}, {n}, 2], "
+            f"gmm_swiglu_quant weight_scale must be uint8/int8 e8m0 of shape [1, {n}, {k_blocks}] (N-major), "
             f"got {tuple(weight_scale.shape)} {weight_scale.dtype}."
         )
-    if x_scale.dtype not in (torch.uint8, torch.int8) or x_scale.dim() != 3 \
-            or x_scale.shape != (rows, k_pairs, 2):
+    if x_scale.dtype not in (torch.uint8, torch.int8) or x_scale.dim() != 2 \
+            or x_scale.shape != (rows, k_blocks):
         raise ValueError(
-            f"gmm_swiglu_quant x_scale must be uint8/int8 e8m0 of shape [{rows}, {k_pairs}, 2], "
+            f"gmm_swiglu_quant x_scale must be uint8/int8 e8m0 of shape [{rows}, {k_blocks}], "
             f"got {tuple(x_scale.shape)} {x_scale.dtype}."
         )
     if group_list.dtype != torch.int64 or group_list.numel() != 1:
@@ -65,12 +65,13 @@ def gmm_swiglu_quant(
 
     Inputs: ``x`` ``[M, K]`` float8_e4m3fn; ``weight`` ``[1, K, N]``
     float8_e4m3fn with the two SwiGLU halves along N (first half feeds the
-    sigmoid branch); ``x_scale`` ``[M, ceil(K/64), 2]`` and ``weight_scale``
-    ``[1, ceil(K/64), N, 2]`` uint8/int8-carried e8m0 scales (one per 32 K
-    elements; per-column for the weight); ``group_list`` int64 ``[1]``
-    cumsum ``[M]`` — dense single expert only for now (E > 1 is rejected).
+    sigmoid branch); ``x_scale`` ``[M, ceil(K/32)]`` and ``weight_scale``
+    ``[1, N, ceil(K/32)]`` (N-major) uint8/int8-carried e8m0 scales (one per
+    32 K elements); ``group_list`` int64
+    ``[1]`` cumsum ``[M]`` — dense single expert only for now (E > 1 is
+    rejected).
 
-    Returns ``(y [M, N/2] float8_e4m3fn, y_scale [M, ceil((N/2)/64), 2]
+    Returns ``(y [M, N/2] float8_e4m3fn, y_scale [M, ceil((N/2)/32)]
     uint8 e8m0)`` ready for the next quantized GEMM.
     """
     _check_gmm_swiglu_quant(x, weight, weight_scale, x_scale, group_list, swiglu_limit)
