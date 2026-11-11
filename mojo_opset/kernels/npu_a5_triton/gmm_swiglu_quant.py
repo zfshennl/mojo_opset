@@ -128,27 +128,29 @@ def _gmm_swiglu_quant_kernel(
         w1_ptrs = weight + offs_k[:, None] * N + offs_n[None, :]
         w2_ptrs = w1_ptrs + half_n
         # weight_scale arrives repacked by the host as contiguous
-        # [k_blocks, N]: byte (kb, n) at kb * N + n, vectorizable along n
-        # (the reference (kp, N, 2) pair packing interleaves n with stride 2
-        # and halves the MX dot rate; evidence:
-        # scripts/gmm_swiglu_quant_variants_bench.py). Tiles are
-        # [BN, BK // 32] in dot_scaled rhs_scale order.
-        ws_base = weight_scale + offs_n[:, None]
+        # [N, k_blocks]: byte (n, kb) at n * k_blocks + kb, so each rhs_scale
+        # tile row [BN, BK // 32] is a contiguous byte run. The k-major
+        # [k_blocks, N] layout forces a strided N-gather + transpose onto the
+        # AIV vector pipe and saturates it (~6.2 ms @ 4096-6144-12288);
+        # N-major drops the whole kernel onto the load path
+        # (scripts/gmm_swiglu_quant_variants_bench.py, msprof op evidence).
+        ws_base = weight_scale + offs_n[:, None] * (k_pairs * 2)
+        ws2_base = ws_base + half_n * (k_pairs * 2)
 
         acc_act = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
         acc_lin = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
         for k in range(0, tl.cdiv(K, BLOCK_K)):
-            k_left = K - k * BLOCK_K
             kb = k * (BLOCK_K // 32) + offs_kb
+            k_left = K - k * BLOCK_K
             k_mask = offs_k < k_left
             kb_mask = kb < k_blocks
             x_tile = tl.load(x_ptrs, mask=m_mask[:, None] & k_mask[None, :], other=0.0)
             xs_tile = tl.load(xs_base + kb[None, :], mask=m_mask[:, None] & kb_mask[None, :], other=0)
-            ws_ptr = kb[None, :] * N
+            ws_ptr = kb[None, :]
             w1_tile = tl.load(w1_ptrs, mask=k_mask[:, None] & n_mask[None, :], other=0.0)
             w2_tile = tl.load(w2_ptrs, mask=k_mask[:, None] & n_mask[None, :], other=0.0)
             ws1_tile = tl.load(ws_base + ws_ptr, mask=n_mask[:, None] & kb_mask[None, :], other=0)
-            ws2_tile = tl.load(ws_base + half_n + ws_ptr, mask=n_mask[:, None] & kb_mask[None, :], other=0)
+            ws2_tile = tl.load(ws2_base + ws_ptr, mask=n_mask[:, None] & kb_mask[None, :], other=0)
             acc_act = tl.dot_scaled(x_tile, xs_tile, "e4m3", w1_tile, ws1_tile, "e4m3", acc=acc_act)
             acc_lin = tl.dot_scaled(x_tile, xs_tile, "e4m3", w2_tile, ws2_tile, "e4m3", acc=acc_lin)
             x_ptrs += BLOCK_K
@@ -196,10 +198,16 @@ def _gmm_swiglu_quant_kernel(
 
 
 def _repack_weight_scale(weight_scale, transposed=False):
-    """(1, kp, N, 2) pair packing -> contiguous (k_blocks, N) for the kernel."""
+    """(1, kp, N, 2) pair packing -> contiguous (N, 2 * kp) for the kernel.
+
+    N-major makes each rhs_scale tile row a contiguous byte run (same layout
+    as the x_scale rows); k-major ([2 * kp, N]) forces an N-strided gather +
+    transpose onto the AIV vector pipe and saturates it (see kernel comment).
+    Padded tail bytes (K not a multiple of 64) are masked out in-kernel.
+    """
     del transposed
     kp, n = weight_scale.shape[1], weight_scale.shape[2]
-    return weight_scale.view(kp, n, 2).transpose(1, 2).reshape(kp * 2, n).contiguous()
+    return weight_scale.view(kp, n, 2).transpose(1, 2).reshape(2 * kp, n).t().contiguous()
 
 
 _prepare_weight_scale = PreparedWeightCache(_repack_weight_scale)
