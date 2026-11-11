@@ -6,21 +6,23 @@
 
 ## 0. 现状速览
 
-- **现产 kernel**：`_gmm_swiglu_quant_kernel`，always-masked + N-major staged
-  weight_scale（`PreparedWeightCache` 每活跃权重重排一次）；
+- **现产 kernel**：`_gmm_swiglu_quant_kernel`，**API 定稿 N-major**——
+  `weight_scale [1,N,⌈K/32⌉]`、`x_scale [M,⌈K/32⌉]`、`y_scale [M,⌈I/32⌉]`，
+  零预处理、零转置、always-masked、循环内现场偏移；
 - **现产 msprof 占比**（4096-6144-12288，`msprof op` sub_block 粒度）：
 
-| sub_block | 时长 µs | cube | aic_mte2 | aic_mte1 | **aiv vec** | aiv_mte2 |
-|---|---:|---:|---:|---:|---:|---:|
-| cube0 ×28 | 8840 | 1634 (0.18) | 2172 (0.25) | 1137 | — | — |
-| vector0/1 ×56 | 8839 | — | — | — | **8744 (0.99 饱和)** | ~1750 |
+| sub_block | 时长 µs | cube | aic_mte2 | **aiv vec** |
+|---|---:|---:|---:|---:|
+| cube0 ×28 | 8840 | 1634 (0.18) | 2146 | — |
+| vector0/1 ×56 | 8839 | — | — | **8742 (0.99 饱和)** |
 
-  → **masked load 的 fill+copy staging 独占 AIV vector pipe**，cube 仅 18%；
-- 现产 vs vllm 冻结基线：**6/8 档领先（2.17-7.53×），全批 M=4096 两档 0.82×/0.92×**；
-- 现产 vs vendor 融合算子：**落后 2.84-5.52×**；
-- 历史峰值（v5，含已被评审指令移除的无 mask 特化）：3654µs@大档、vs vllm
-  **8/8 领先**、vs vendor 1.44-3.19×；
-- 剩余差距的三个平台降级缺口与修复项见 §8。
+  → vector pipe 仅剩 **masked load 的 fill+copy staging**（~5.2ms，
+  G2/M2 平台项）；scale 通路成本归零；
+- 现产 vs vllm 冻结基线：**6/8 档领先（1.43-8.27×），全批 M=4096 两档
+  0.82×/0.92×**；vs vendor：**落后 2.46-5.38×**（vendor 对比脚本含一次性
+  pair 重组，计时不计）；decode 档 286/217µs 为历史最佳；
+- 历史峰值（v5，含已被指令移除的无 mask 特化与 host 重排）：3654µs；
+- 剩余差距的平台降级缺口与修复项见 §8（`gmm_swiglu_quant_ascendc_gap.md`）。
 
 ## 1. 环境与口径
 
@@ -48,7 +50,22 @@
 | v4 | host k-major 重排 + masked 单路径 + V3 数值 epilogue | 9969 |
 | 定位轮 | msprof op + 消融：AIV vec 饱和（scale gather 3.5ms + mask staging 5.2ms） | — |
 | v5 | N-major scale 重排 + EVEN 无 mask 特化 | **3654（峰值）** |
-| 评审回撤 | EVEN 移除（禁无 mask）；raw 布局 in-kernel 消费穷尽（全败） | 8840-9084（现产） |
+| 评审回撤 | EVEN 移除（禁无 mask）；raw 布局 in-kernel 消费穷尽（全败） | 8840-9084 |
+| 规范化 | 禁 `+=` 指针步进、禁指针隐式转置（显式 `tl.trans`，scale 侧 fold 缺失实测 +2.4ms） | 11422 |
+| 禁预处理 | raw pair 直连（3D `[BN,P,2]` 块 + reshape，`K_PAD` constexpr）；动态 3D mask 谓词化排障（66.7→15.9ms） | 15892 |
+| 现产 | **API 重构：去 pair、scale 轴序随数据张量**（`weight_scale [1,⌈K/32⌉,N]` 等），`[BK/32,BN]` 自然 tile + 显式 `tl.trans`，零预处理 | **11408（现产）** |
+
+### API 演进记录（2026-11-11，本轮定案）
+
+评审决策：**放弃 vendor 的 pair 打包，scale 布局与数据张量轴序一致**——
+`weight_scale [1, ⌈K/32⌉, N]`（N 内，随 weight `[1,K,N]`）、`x_scale
+[M, ⌈K/32⌉]`（随 x 行主序）、`y_scale [M, ⌈I/32⌉]`。动机：triton 的
+`dot_scaled` 前端是逐字节 `[N, K/32]` tile 契约，pair 只服务 MTE 专用道
+（`gmm_swiglu_quant_ascendc_gap.md` §1.4/§1.5）；轴序一致使 kernel 的
+scale tile 与 fp8 tile 同构（`[BK/32, BN]` 自然加载），x/y 侧与旧布局
+字节等价（仅去 pair 视图、尾部精确化）。vendor 对比路径改为脚本内一次性
+pair 重组（计时外）。注意：若平台 M1（pair 直通 nd2nz）落地，k-major 字节
+布局仍可按 `[kp, N]` b16 reinterpret（相邻两字节即 pair），无需再改 API。
 
 ## 3. 第一轮（v1→v4）：host 重排时代，5.3-6.8×
 
@@ -157,94 +174,48 @@
    scale 通路 vec 6195→32µs。输出侧 `BN//32, 32` / `g_start//32` 是 MX
    32 元素组的格式语义，不可移除。
 
-## 7. 现产数据（masked + N-major staged）
+## 7. 现产数据（API 定稿 N-major：零预处理零转置）
 
-sweep（`gmm_swiglu_quant_perf_masked.json`）：
+sweep（`gmm_swiglu_quant_perf_v7.json`；对照 v6 k-major+trans）：
 
-| Case | v4 | v5（已回撤） | **现产** |
-|---|---:|---:|---:|
-| `1-6144-12288-0.0` | 518.9 | 331.9 | **356.5** |
-| `512-6144-12288-0.0` | 1506.7 | 680.3 | **1231.2** |
-| `4096-6144-12288-0.0` | 9969.2 | 3804.0 | **9083.7** |
-| `1-4096-12288-10.0` | 371.9 | 247.6 | **255.1** |
-| `512-4096-12288-10.0` | 998.4 | 470.3 | **994.1** |
-| `4096-4096-12288-10.0` | 6973.8 | 2479.6 | **6499.4** |
-| `64-6144-2048-0.0` | 215.0 | 126.3 | **263.3** |
-| `512-4096-2048-10.0` | 324.1 | 156.9 | **263.6** |
+| Case | v6 (k-major+trans) | **现产 v7 (N-major)** |
+|---|---:|---:|
+| `1-6144-12288-0.0` | 457.6 | **305.6** |
+| `512-6144-12288-0.0` | 1547.0 | **1199.4** |
+| `4096-6144-12288-0.0` | 11408.2 | **9115.8** |
+| `1-4096-12288-10.0` | 331.0 | **222.2** |
+| `512-4096-12288-10.0` | 1145.8 | **894.4** |
+| `4096-4096-12288-10.0` | 8078.7 | **6438.5** |
+| `64-6144-2048-0.0` | 182.5 | **137.5** |
+| `512-4096-2048-10.0` | 294.2 | **249.2** |
 
 vs vllm 冻结基线（冷 L2 event 中位，µs）：
 
 | Case | 现产 | vllm | vllm/现产 |
 |---|---:|---:|---:|
-| `1-6144-12288-0.0`（decode） | 323.3 | 2399.1 | **7.42×** |
-| `512-6144-12288-0.0` | 1250.4 | 2832.2 | **2.27×** |
-| `4096-6144-12288-0.0` | 9002.7 | 7424.8 | 0.82× |
-| `1-4096-12288-10.0`（decode） | 234.5 | 1766.8 | **7.53×** |
-| `512-4096-12288-10.0` | 899.7 | 1953.0 | **2.17×** |
-| `4096-4096-12288-10.0` | 6428.7 | 5897.0 | 0.92× |
-| `64-6144-2048-0.0` | 187.4 | 455.3 | **2.43×** |
-| `512-4096-2048-10.0` | 255.0 | 376.4 | **1.48×** |
+| `1-6144-12288-0.0`（decode） | 286.2 | 2367.9 | **8.27×** |
+| `512-6144-12288-0.0` | 1186.4 | 2757.6 | **2.32×** |
+| `4096-6144-12288-0.0` | 8938.3 | 7368.8 | 0.82× |
+| `1-4096-12288-10.0`（decode） | 216.7 | 1598.5 | **7.38×** |
+| `512-4096-12288-10.0` | 868.4 | 1913.0 | **2.20×** |
+| `4096-4096-12288-10.0` | 6385.9 | 5896.7 | 0.92× |
+| `64-6144-2048-0.0` | 122.1 | 426.4 | **3.49×** |
+| `512-4096-2048-10.0` | 229.0 | 326.8 | **1.43×** |
 
-vs vendor 融合算子（同口径）：
+vs vendor 融合算子（vendor 吃 pair，脚本一次性重组不计入计时）：
 
 | Case | 现产 | vendor | 现产/vendor |
 |---|---:|---:|---:|
-| `1-6144-12288-0.0`（decode） | 371.0 | 117.9 | 3.15× |
-| `512-6144-12288-0.0` | 1215.2 | 284.8 | 4.27× |
-| `4096-6144-12288-0.0` | 8994.8 | 1776.0 | 5.06× |
-| `1-4096-12288-10.0`（decode） | 217.3 | 74.7 | 2.91× |
-| `512-4096-12288-10.0` | 887.5 | 203.4 | 4.36× |
-| `4096-4096-12288-10.0` | 6593.1 | 1194.3 | 5.52× |
-| `64-6144-2048-0.0` | 127.3 | 44.9 | 2.84× |
-| `512-4096-2048-10.0` | 232.8 | 65.9 | 3.53× |
+| `1-6144-12288-0.0`（decode） | 285.2 | 115.0 | 2.48× |
+| `512-6144-12288-0.0` | 1188.3 | 283.6 | 4.19× |
+| `4096-6144-12288-0.0` | 8922.3 | 1758.0 | 5.08× |
+| `1-4096-12288-10.0`（decode） | 202.7 | 75.5 | 2.68× |
+| `512-4096-12288-10.0` | 859.7 | 197.7 | 4.35× |
+| `4096-4096-12288-10.0` | 6350.8 | 1180.2 | 5.38× |
+| `64-6144-2048-0.0` | 120.2 | 48.9 | 2.46× |
+| `512-4096-2048-10.0` | 224.7 | 69.7 | 3.23× |
 
-- 交叉验证"原生 MX ≈ 2× bf16"：vendor 对旧 bf16 mm1 kernel 恰 1.9-2.0×
-  （1756 vs 3333 µs），与本算子微基准推断一致；
-- decode 档（M=1 非 EVEN 形状）几乎不受回撤影响（356 vs 332µs），大档
-  回到 v4 水平（masked staging 主导）。
+- v7 对 v6 全面 **1.18×-1.50×**（消除了不 fold 的 scale trans）；
+- decode 档 286/217µs 为全历史最佳（零转置 + 零 wrapper 开销）；
+- 交叉验证"原生 MX ≈ 2× bf16"：vendor 对旧 bf16 mm1 kernel 恰 1.9-2.0×。
 
-## 8. 平台修复项（按收益排序，均有证据）
-
-1. **masked load → 边界钳长 MTE 拷贝**（≈ 回收 5.2ms）：矩形掩码
-   `m[:,None] & k[None,:]` 可精确表达为按块拷贝长度；vendor 即如此
-   （tiling 精确长度，无掩码）。证据：现产 msprof（vec 8744µs / 0.99）；
-2. **dot_scaled scale 格式错配**（≈ 回收 9.5ms）：接受 pair-packed（b16
-   视图）或 `[K/32, N]` 直通 MTE nd2nz（vendor 机制见 §6.3）；
-3. **fp8 ND 行跨步碎段搬运**（≈ 回收 2ms）：w 行跨 N=24KB 只能 128B 碎段
-   （v5 峰值时 AIC MTE2 3644µs 打满 vs cube 1634µs）；vendor FRACTAL_NZ
-   连续块。
-   三项合计：合规形态 16ms → ~2ms 级（vendor 1.74ms）。
-
-## 附录 A：穷尽过的其他杠杆（无收益/负收益，均留证据）
-
-| 杠杆 | 结果 |
-|---|---|
-| tile 对齐 vendor AscendC（baseM=128/baseN=256/baseK=128，`sweep_probe.py`） | 全对齐 (128,256,128) **L0C 溢出**：双累加器 × `l0c=2` = 512KB > 256KB（`cc overflow`）；`l0c=1` 后 **UB 溢出**（258KB > 216KB）。BN=256 仅 BM=64 可行但慢 2.7×；仅对齐 BK=128 → 大 M 慢 2.7-2.8%，decode 慢 20.6%。**tiling 非差距主因**（vendor 单累加器 + AscendC 流式 epilogue 恰好贴边可行） |
-| tile 扫描（BM/BN/BK 8 档，`sweep_probe.py`） | BM=128 各配置持平平台期；BM=64 减半 |
-| `dot_scaled(fast_math=True)` | 慢 2.2× |
-| 手工 32 块小 dot + epilogue 融合 scale | 慢 2.5×（K=32 小 dot 无效率） |
-| `--multibuffer-mode` l1=4/8、libcall 内联 | 无变化（pipe 定位轮排除） |
-
-## 附录 B：后端缺陷清单（均有复现脚本）
-
-| 现象 | 复现 |
-|---|---|
-| `libdevice.rint` 打挂 AIC | `scripts/gmm_swiglu_quant_rint_probe.py`（kernel 内联 banker's rint 绕开） |
-| `dot_scaled` 非 2 幂 scale tile 触发 cube 指令异常 | `scripts/gmm_swiglu_quant_tile_probe.py`（tile 规则 BN/BK 取 2 幂） |
-| torch_npu 全常量索引 gather 返回错值 | `scripts/gmm_swiglu_quant_gather_probe.py`（测试用 `repeat_interleave` 绕开） |
-| aclnn fp32 matmul 大 shape 新进程稳定挂起 | `scripts/gmm_swiglu_quant_refbis_probe.py`（torch 参考路径受影响） |
-| pair 打包 scale 交错寻址 ~2-5× | `scripts/gmm_swiglu_quant_variants_bench.py` |
-| 寄存器布局算子（interleave/join/permute/reshape）降级 AIV 逐元素 | `scripts/gmm_swiglu_quant_rawpair_probe.py`、`raw3d_probe.py` |
-
-## 附录 C：证据脚本索引
-
-| 脚本 | 用途 |
-|---|---|
-| `gmm_swiglu_quant_vs_torch.py` / `vs_npu_v2.py` | vllm 冻结基线 / vendor 对比 |
-| `gmm_swiglu_quant_trace_probe.py` | torch profiler 采集（注意 `aiv_time` 坏列） |
-| `gmm_swiglu_quant_vecbound_ablate.py` | §4 消融矩阵复现 |
-| `gmm_swiglu_quant_unmasked_probe.py` | 无 mask 剥离 kernel（历史定位用） |
-| `gmm_swiglu_quant_rawpair_probe.py` / `raw3d_probe.py` | raw pair 布局 in-kernel 消费 |
-| `gmm_swiglu_quant_subk_probe.py` | sub-block-K（BK=64）实验 |
-| `gmm_swiglu_quant_sweep_probe.py` / `tile_probe.py` | tile 扫描 / tile 规则 |
-| `gmm_swiglu_quant_cast_probe.py` / `rint_probe.py` | 数值语义探针 |
