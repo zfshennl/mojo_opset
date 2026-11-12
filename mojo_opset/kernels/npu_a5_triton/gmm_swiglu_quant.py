@@ -3,7 +3,6 @@ import triton
 import triton.language as tl
 
 from mojo_opset.kernels._npu_triton_utils import get_num_cores
-from mojo_opset.kernels._npu_triton_utils import libentry
 
 """
 GmmSwigluQuant for NPU A5 (forward only): one fused launch. The former
@@ -51,7 +50,15 @@ Modifications for NPU architecture by triton-x team, 2025.
 _TILE_BUDGET_BYTES = 512 * 1024 // 2  # L1 / 2
 _BK_MAX = 512
 _BK_MIN = 32  # one MX scale block: tl.dot_scaled K granularity
-_WIDE_N_BK_MAX = 256  # MLIR cap for BN >= 128
+_TileBKMaxWide = 256
+# BK=512 halves the scale GM->L1 fetch events (MTE2 floors each row at 128
+# elements: b16 scale rows pay 256B per 8B; scripts/gmm_scale_fetch_probe.py
+# 2026-11-12 sweep) and wins on every K=6144 shape, but regressed K=4096
+# 0.79-0.92x in the perf harness (fewer k-iters than the software pipeline
+# hides), so it is gated on K.
+_BK512_MIN_K = 6144
+_WIDE_N_BK_MAX = 512  # 256 was assumed MLIR cap for BN >= 128; the probe
+# compiled+ran BN=128/BK=512, so the cap is the L1 budget, gated by K.
 _DECODE_ROWS = 16
 _BM_CAP = 128  # fused quant epilogue UB budget (2.5*BM*BN*4B <= 248 KiB)
 _NUM_B = 2  # dual accumulators (act / lin halves)
@@ -77,11 +84,16 @@ def _stage_tiles(rows: int, n: int, k: int, cores: int = 28):
     per_k = _align32(block_m) + _NUM_B * _align32(block_n)  # fp8: 1 byte/elem
     block_k = min(_TILE_BUDGET_BYTES // per_k, _BK_MAX, k & ~(_BK_MIN - 1) or _BK_MIN)
     if block_n >= 128:
-        block_k = min(block_k, _WIDE_N_BK_MAX)
+        block_k = min(block_k, _WIDE_N_BK_MAX if k >= _BK512_MIN_K else _TileBKMaxWide)
     return block_m, block_n, max(_pow2_floor(block_k), _BK_MIN)
 
 
-@libentry()
+# NOTE (2026-11-12, fetch-granularity investigation): @libentry() doubled the
+# MTE2 instruction stream and GM->L1 bytes of this kernel (every operand load
+# issued twice: 24 vs 12 MTE2 instr/k-iter at BK=256, bytes x2.000 exact;
+# scripts/gmm_prod_no_libentry.py A/B). Removed — the no-libentry fallback is
+# the module's own designed path. Clean-lowering bytes at BK=512 then match
+# the per-row fetch model to 0.1% (4.989 GB measured vs 4.98 predicted).
 @triton.jit(do_not_specialize=["M", "N", "K"])
 def _gmm_swiglu_quant_kernel(
     x, weight, x_scale, weight_scale, y, y_scale,
