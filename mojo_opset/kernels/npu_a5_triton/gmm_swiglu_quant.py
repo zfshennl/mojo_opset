@@ -62,6 +62,7 @@ _WIDE_N_BK_MAX = 512  # 256 was assumed MLIR cap for BN >= 128; the probe
 _DECODE_ROWS = 16
 _BM_CAP = 128  # fused quant epilogue UB budget (2.5*BM*BN*4B <= 248 KiB)
 _NUM_B = 2  # dual accumulators (act / lin halves)
+_BAND_M = 8  # m-blocks per program chunk (L2 x-band width of the grid)
 
 
 def _align32(value: int) -> int:
@@ -94,45 +95,57 @@ def _stage_tiles(rows: int, n: int, k: int, cores: int = 28):
 # scripts/gmm_prod_no_libentry.py A/B). Removed — the no-libentry fallback is
 # the module's own designed path. Clean-lowering bytes at BK=512 then match
 # the per-row fetch model to 0.1% (4.989 GB measured vs 4.98 predicted).
-@triton.jit(do_not_specialize=["M", "N", "K"])
+@triton.jit(do_not_specialize=["M", "N", "K", "HALF_N"])
 def _gmm_swiglu_quant_kernel(
     x, weight, x_scale, weight_scale, y, y_scale,
-    M, N, K,
+    M, N, K, HALF_N,
     limit,
     HAS_LIMIT: tl.constexpr,
     K_TAIL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
+    CHUNK_M: tl.constexpr,
 ):
     """y, y_scale = mxfp8_quant(silu(clamp(x @ W[:, :I])) * clamp(x @ W[:, I:])).
 
     Two tl.dot_scaled accumulators share each x tile (fp8e4m3 operands,
     e8m0 per-32 scales); the SwiGLU + MX quant epilogue runs on the
     compiler-dispatched vector cores of the same launch. FP32 math.
+
+    Grid is (n-blocks, m-chunks): axis 0 is one n-block over I, axis 1 one
+    CHUNK_M-wide run of m-blocks, so the tile coordinates come straight
+    from program_id (times the constexpr chunk) and no flattened tile
+    index is ever decoded — no integer division or modulo anywhere in
+    the kernel, only affine (* + -) index math. Programs scheduled
+    together share one BLOCK_M row band of x in L2, the locality the old
+    flattened grouped ordering bought with three div/mod decodes per
+    tile; the m-chunk sweep additionally keeps each program's weight
+    tiles hot across its CHUNK_M tiles.
     """
-    pid = tl.program_id(axis=0)
-    num_cores = tl.num_programs(axis=0)
-    half_n = N // 2
+    # Compile-time MX-group counts per tile (BLOCK_K / BLOCK_N are powers
+    # of two >= 32); folded at trace time, never emitted as ops.
+    K_GROUPS: tl.constexpr = BLOCK_K // 32
+    N_GROUPS: tl.constexpr = BLOCK_N // 32
+
+    pid_n = tl.program_id(axis=0)  # n-block over I (output cols)
+    pid_b = tl.program_id(axis=1)  # m-chunk
+    half_n = HALF_N
     i_blocks = tl.cdiv(half_n, 32)
     k_blocks = tl.cdiv(K, 32)
     num_pid_m = tl.cdiv(M, BLOCK_M)
-    num_pid_n = tl.cdiv(half_n, BLOCK_N)
+    k_iters = tl.cdiv(K, BLOCK_K)
 
-    for tile in range(pid, num_pid_m * num_pid_n, num_cores):
-        # Grouped ordering keeps one BLOCK_M row band of x hot in L2.
-        group_id = tile // (8 * num_pid_n)
-        first_m = group_id * 8
-        group_m = tl.minimum(num_pid_m - first_m, 8)
-        pid_m = first_m + (tile % group_m)
-        pid_n = (tile % (8 * num_pid_n)) // group_m
+    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    offs_k = tl.arange(0, BLOCK_K)
+    offs_kb = tl.arange(0, K_GROUPS)
+    n_mask = offs_n < half_n
 
+    m_lo = pid_b * CHUNK_M
+    m_hi = tl.minimum(m_lo + CHUNK_M, num_pid_m)  # ragged tail chunk
+    for pid_m in range(m_lo, m_hi):
         offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-        offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)  # over I (output cols)
-        offs_k = tl.arange(0, BLOCK_K)
-        offs_kb = tl.arange(0, BLOCK_K // 32)
         m_mask = offs_m < M
-        n_mask = offs_n < half_n
 
         acc_act = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
         acc_lin = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
@@ -151,11 +164,11 @@ def _gmm_swiglu_quant_kernel(
         #   K_TAIL (K % BLOCK_K != 0): full m&kb / n&kb masks (K-tail guard);
         #   else: the kb component is statically all-true and is elided,
         #         keeping the (free, unconditional) m/n row masks.
-        for k in range(0, tl.cdiv(K, BLOCK_K)):
+        for k in range(0, k_iters):
             k_ofs = k * BLOCK_K
             k_left = K - k_ofs
             k_mask = offs_k < k_left
-            kb = k_ofs // 32 + offs_kb
+            kb = k * K_GROUPS + offs_kb  # = k_ofs // 32 + offs_kb, 32 | BLOCK_K
             x_tile = tl.load(
                 x + offs_m[:, None] * K + (k_ofs + offs_k)[None, :],
                 mask=m_mask[:, None] & k_mask[None, :], other=0.0)
@@ -209,7 +222,7 @@ def _gmm_swiglu_quant_kernel(
         # no-carry OCP scale may saturate values to +-448. e is clamped at
         # the e8m0 encoding floor (-127): a sub-2^-119 amax would otherwise
         # wrap the byte cast and decode as a huge scale.
-        groups = s.reshape(BLOCK_M, BLOCK_N // 32, 32)
+        groups = s.reshape(BLOCK_M, N_GROUPS, 32)
         amax = tl.max(tl.abs(groups), axis=2)
         e = tl.where(amax > 0.0, tl.floor(tl.log2(amax)) - 8.0, -127.0)
         e = tl.maximum(e, -127.0)
@@ -225,11 +238,13 @@ def _gmm_swiglu_quant_kernel(
         y_ptrs = y + offs_m[:, None] * half_n + offs_n[None, :]
         tl.store(y_ptrs, q.reshape(BLOCK_M, BLOCK_N).to(y.dtype.element_ty),
                  mask=m_mask[:, None] & n_mask[None, :])
-        offs_g = tl.arange(0, BLOCK_N // 32)
-        g_start = pid_n * BLOCK_N + offs_g * 32  # first column of each MX group
-        ys_ptrs = y_scale + offs_m[:, None] * i_blocks + g_start[None, :] // 32
+        # y_scale column of each MX group = (its first column) / 32, built by
+        # multiplication instead of a per-lane integer division.
+        offs_g = tl.arange(0, N_GROUPS)
+        g_col = pid_n * N_GROUPS + offs_g  # first column of group g is g_col * 32
+        ys_ptrs = y_scale + offs_m[:, None] * i_blocks + g_col[None, :]
         tl.store(ys_ptrs, (e + 127.0).to(tl.int32).to(tl.uint8),
-                 mask=m_mask[:, None] & (g_start[None, :] < half_n))
+                 mask=m_mask[:, None] & (g_col[None, :] * 32 < half_n))
 
 
 def _check_gmm_swiglu_quant_inputs(x, weight, weight_scale, x_scale, group_list, swiglu_limit):
@@ -300,15 +315,23 @@ def gmm_swiglu_quant_fwd_impl(
 
     y = x_2d.new_empty((rows, inter), dtype=torch.float8_e4m3fn)
     y_scale = x_2d.new_zeros((rows, triton.cdiv(inter, 32)), dtype=torch.uint8)
-    gemm_cores = get_num_cores("cube")
 
-    block_m, block_n, block_k = _stage_tiles(rows, inter, k, gemm_cores)
-    num_tiles = triton.cdiv(rows, block_m) * triton.cdiv(inter, block_n)
-    _gmm_swiglu_quant_kernel[(min(gemm_cores, num_tiles),)](
+    block_m, block_n, block_k = _stage_tiles(rows, inter, k)
+    num_pid_m = triton.cdiv(rows, block_m)
+    num_pid_n = triton.cdiv(inter, block_n)
+    # 2D grid (n-blocks, m-chunks): tile coordinates come from program_id,
+    # so the kernel decodes no flattened tile index and needs no div/mod.
+    # CHUNK_M=8 keeps the L2 wave on one x row band and each program's
+    # weight tiles hot across its chunk; when the n axis alone cannot fill
+    # the cube cores (num_pid_n < cores), chunk 1 splits m instead so the
+    # launch still saturates them.
+    cores = get_num_cores("cube")
+    chunk_m = _BAND_M if num_pid_n >= cores else 1
+    _gmm_swiglu_quant_kernel[(num_pid_n, triton.cdiv(num_pid_m, chunk_m))](
         x_2d, weight, x_scale, weight_scale, y, y_scale,
-        rows, n, k,
+        rows, n, k, inter,
         float(swiglu_limit), swiglu_limit > 0.0, k % block_k != 0,
-        BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_K=block_k,
+        BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_K=block_k, CHUNK_M=chunk_m,
     )
     return y, y_scale
 
