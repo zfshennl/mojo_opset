@@ -19,6 +19,7 @@ from tests._compile import compile_fullgraph
 # (Glm5NextTextMLP): hidden 4096, intermediate 12288, swiglu_limit=10.0.
 GMM_SWIGLU_QUANT_SHAPES = [
     (7, 512, 320),  # odd tail rows/columns
+    (8, 96, 32),  # K tail: tile BK=64 < K=96 -> K_TAIL branch (kb-masked scale loads)
     (128, 512, 320),
     (37, 1024, 768),
     (1, 6144, 12288),  # glm-5.3 dense MLP decode

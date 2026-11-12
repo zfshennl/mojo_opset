@@ -88,6 +88,7 @@ def _gmm_swiglu_quant_kernel(
     M, N, K,
     limit,
     HAS_LIMIT: tl.constexpr,
+    K_TAIL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -128,18 +129,24 @@ def _gmm_swiglu_quant_kernel(
         # loads directly as [BN, BK // 32] (rows n-contiguous along kb) —
         # exactly the orientation tl.dot_scaled's rhs_scale contract wants,
         # no runtime transpose anywhere.
+        #
+        # Scale-load masking branches on the K tail only. Evidence
+        # (scale_masked/repro.py, 2026-11-12): on the 8-byte-row i8 scale
+        # tiles the *contiguous-axis* (kb) mask component degrades the whole
+        # load to element-wise predication on the AIV vector pipe (+5.4 ms
+        # at the large shape), while the row-axis (m/n) mask components are
+        # free at any row width and the fp8 operand masks are free. So:
+        #   K_TAIL (K % BLOCK_K != 0): full m&kb / n&kb masks (K-tail guard);
+        #   else: the kb component is statically all-true and is elided,
+        #         keeping the (free, unconditional) m/n row masks.
         for k in range(0, tl.cdiv(K, BLOCK_K)):
             k_ofs = k * BLOCK_K
             k_left = K - k_ofs
             k_mask = offs_k < k_left
             kb = k_ofs // 32 + offs_kb
-            kb_mask = kb < k_blocks
             x_tile = tl.load(
                 x + offs_m[:, None] * K + (k_ofs + offs_k)[None, :],
                 mask=m_mask[:, None] & k_mask[None, :], other=0.0)
-            xs_tile = tl.load(
-                x_scale + offs_m[:, None] * k_blocks + kb[None, :],
-                mask=m_mask[:, None] & kb_mask[None, :], other=0)
             w1_tile = tl.load(
                 weight + (k_ofs + offs_k)[:, None] * N + offs_n[None, :],
                 mask=k_mask[:, None] & n_mask[None, :], other=0.0)
@@ -147,12 +154,27 @@ def _gmm_swiglu_quant_kernel(
             w2_tile = tl.load(
                 weight + (k_ofs + offs_k)[:, None] * N + (half_n + offs_n)[None, :],
                 mask=k_mask[:, None] & n_mask[None, :], other=0.0)
-            ws1_tile = tl.load(
-                weight_scale + offs_n[:, None] * k_blocks + kb[None, :],
-                mask=n_mask[:, None] & kb_mask[None, :], other=0)
-            ws2_tile = tl.load(
-                weight_scale + (half_n + offs_n)[:, None] * k_blocks + kb[None, :],
-                mask=n_mask[:, None] & kb_mask[None, :], other=0)
+            if K_TAIL:
+                kb_mask = kb < k_blocks
+                xs_tile = tl.load(
+                    x_scale + offs_m[:, None] * k_blocks + kb[None, :],
+                    mask=m_mask[:, None] & kb_mask[None, :], other=0)
+                ws1_tile = tl.load(
+                    weight_scale + offs_n[:, None] * k_blocks + kb[None, :],
+                    mask=n_mask[:, None] & kb_mask[None, :], other=0)
+                ws2_tile = tl.load(
+                    weight_scale + (half_n + offs_n)[:, None] * k_blocks + kb[None, :],
+                    mask=n_mask[:, None] & kb_mask[None, :], other=0)
+            else:
+                xs_tile = tl.load(
+                    x_scale + offs_m[:, None] * k_blocks + kb[None, :],
+                    mask=m_mask[:, None], other=0)
+                ws1_tile = tl.load(
+                    weight_scale + offs_n[:, None] * k_blocks + kb[None, :],
+                    mask=n_mask[:, None], other=0)
+                ws2_tile = tl.load(
+                    weight_scale + (half_n + offs_n)[:, None] * k_blocks + kb[None, :],
+                    mask=n_mask[:, None], other=0)
             acc_act = tl.dot_scaled(x_tile, xs_tile, "e4m3", w1_tile,
                                     ws1_tile, "e4m3", acc=acc_act)
             acc_lin = tl.dot_scaled(x_tile, xs_tile, "e4m3", w2_tile,
@@ -260,8 +282,8 @@ def gmm_swiglu_quant_fwd_impl(
         weight_scale = weight_scale.view(torch.uint8)
     if x_scale.dtype is not torch.uint8:
         x_scale = x_scale.view(torch.uint8)
-    # weight_scale flows to the kernel in its raw API pair packing
-    # [kp, N, 2] (zero-copy dtype view only, same as x_scale).
+    # weight_scale flows to the kernel as raw N-major bytes [N, k_blocks]
+    # (zero-copy dtype view only, same as x_scale).
     weight_scale = weight_scale.contiguous().view(torch.uint8).view(-1)
 
     y = x_2d.new_empty((rows, inter), dtype=torch.float8_e4m3fn)
@@ -273,7 +295,7 @@ def gmm_swiglu_quant_fwd_impl(
     _gmm_swiglu_quant_kernel[(min(gemm_cores, num_tiles),)](
         x_2d, weight, x_scale, weight_scale, y, y_scale,
         rows, n, k,
-        float(swiglu_limit), swiglu_limit > 0.0,
+        float(swiglu_limit), swiglu_limit > 0.0, k % block_k != 0,
         BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_K=block_k,
     )
     return y, y_scale
