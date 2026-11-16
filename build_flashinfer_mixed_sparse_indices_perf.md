@@ -264,3 +264,58 @@ decode-topk 24——各含 i64 gather 索引 8；decode-SWA ≈1（remap 已跳�
 - a2 双胞胎文件同步修改（仅 UB_BYTES/namespace 不同，diff 校验一致）；A2 上板数据待 A2 主机补测。
 - 块大小 constexpr 化的代价：每 distinct (swa_bs, span, cbs, span) 组合一次 JIT 编译
   （DSV4.1 全层仅 2–3 个组合，triton 缓存后无重编译开销）。
+
+---
+
+# 指令级仿真研究：非连续访存与高标量的可削减性（OPPROF_20261116114905）
+
+对 long_chunk_ratio2（当前 v4 kernel）跑逐指令仿真（SIMT 计入 vec 占用口径），
+单核（core0.veccore0）周期构成：
+
+| 成分 | 周期占比 | 说明 |
+| --- | ---: | --- |
+| SET_FLAG/WAIT_FLAG | **52.6%** | SIMT↔SIMD↔MTE 段间排队同步（352 次，~1150 cyc/次），每个 token ~4.8 次管线切换 |
+| SIMT 算术（RVECEX） | 13.2% | SIMT_S2R/ISETP/LEA/SHFI/IADD + RV_VADD 等（地址生成与 lane 内计算） |
+| SCALAR | 7.3% | 每 token prologue 标量序列 + 循环簿记（MOV_XD_IMM 1488 次） |
+| SIMT load（LDG/LDS） | 6.9% | topk gather 的逐 lane 全局读（LDG 84 cyc/次）+ UB 暂存读（LDS 27–40） |
+| MTE2 / MTE3 DMA | 4.8% / 2.5% | 行连续搬运（MOV_SRC_TO_DST_ALIGNv2 描述符） |
+| SIMD 向量数学 | ~4.7% | 移位/选择/乘加（优化后已很小） |
+| PUSHQ/RVECLP/RVECSU 等 | ~6% | 队列与循环开销 |
+
+源码行归属（code_exe）：topk 块表 gather（L246）8.8%、topk 掩码 where（L252）9.0%、
+两段 store（L258/L231）15.4%、SWA where（L227）2.5%、lens 标量 store（L262）3.9%。
+**非连续访存只剩一处**：topk 块表逐 lane 间接读（SIMTIndirectLoad）；其余访存均为行连续 DMA。
+
+## 真机对照实验（事件计时，long_chunk_ratio2，输出均与生产逐位一致）
+
+| 方案 | 结果 | 结论 |
+| --- | ---: | --- |
+| 生产 kernel（v4 语义复刻，grid-stride） | 67.4 µs (med) / 50.9 (min) | 基准 |
+| + 连续分片（每 core 连续 token 段） | **64.6 / 46.5** | **−4%**，可白拿 |
+| token 分块 PoC（TOK=2/4/8/16，2D tile） | 185/126/100/**95.2** | **劣化 1.5×**，否决 |
+
+解读：仿真是逐指令串行模型，同步税被高估——真机 msprof 三管线并发（vec 92% /
+scalar 59% / mte3 60%），段间切换大部分被重叠掩盖；tile 化虽按逻辑能摊薄标量与切换，
+但 triton-ascend 对 2D 掩码访存不融合成大 MTE 描述符，tile 地址/掩码机器反而增加向量负载。
+
+## 结论：算子逻辑层面的削减空间
+
+**已兑现（本报告 v1→v4：127 → 48.7 µs）**：恒等 remap 跳过、块大小移位化、SWA gather→
+标量查表——SWA 段在仿真中已降为次要项，非连续访存基本清除（仅剩 topk 一处）。
+
+**可再拿（小）**：grid-stride → 连续分片，实测 −4%（混杂负载下分片内 token 均匀，失衡 ≤1
+token，安全）；未合入，待确认后一行改动即可。
+
+**Triton 层已到边界**：剩余大头（topk 间接读 + 每 token SIMT 段 + 切换税）在当前
+triton-ascend 降级下无法通过算子逻辑重组消除（tile 化实测劣化；广播比较行 gather 此前实测
+133.8 µs 已否决）。进一步削减需要以下之一：
+
+1. **上游契约变更（收益最大）**：让 indexer 直接产出全局槽位号，topk 段退化为纯流式拷贝，
+   kernel 逼近 13.5 µs 访存下界——但改动跨 vLLM/FlashInfer 接口，超出本仓边界。
+2. **手写 AscendC kernel**：按请求分组（块表行一次驻 UB，gather 变 LDS 27–40 cyc 替代
+   LDG 84 cyc）、批内合并 SIMT 段与 DMA 描述符、请求级元数据驻寄存器——仿真显示这三项
+   合计可再砍 ~30–40% 周期，但需要底层控制，Triton 表达不出。
+3. 每 token 标量 prologue 的向量化在 PoC 中已随 tile 化一并验证为"逻辑可行、降级不利"，
+   同样归入手写路径。
+
+原始数据：`bfmsi_sim_study.tar.gz`（仿真 CSV + tiled/contig 实验脚本）。
