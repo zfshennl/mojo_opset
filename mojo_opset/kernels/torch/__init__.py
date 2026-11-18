@@ -22,6 +22,7 @@ OPS = {
     "embedding_nf4_dequant": "over_encoding",
     "over_encoding_decode": "over_encoding",
     "lightning_indexer": "indexer",
+    "mhc_post": "mhc_post",
     "store_lowrank": "store_lowrank",
     "rope_infer": "position_embedding",
     "vision_rope_2d_infer": "position_embedding",
