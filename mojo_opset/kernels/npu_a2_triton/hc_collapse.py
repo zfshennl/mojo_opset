@@ -18,6 +18,24 @@ from mojo_opset.kernels._triton_utils import input_guard
 # tail-lane waste unless they divide hidden_size exactly.
 HC_COLLAPSE_BLOCK_H = 9216
 
+# UB budget for the hc_mult static_range expansion; see the A5 twin for
+# the calibration. A2 limits scale by the 192/256 UB ratio and are not
+# measured on hardware, same policy as HC_COLLAPSE_BLOCK_H above.
+HC_COLLAPSE_UB_ELEMENTS = {2: 49152, 4: 12288}
+
+
+def _block_size(hidden_size, hc_mult, element_size):
+    """Whole-row tile width bounded by the UB budget of the stream expansion."""
+    block_h = min(hidden_size, HC_COLLAPSE_BLOCK_H)
+    limit = HC_COLLAPSE_UB_ELEMENTS.get(element_size)
+    if limit is not None:
+        if hc_mult > limit:
+            raise AssertionError(
+                f"hc_collapse: hc_mult({hc_mult}) exceeds Unified Buffer budget (limit {limit})"
+            )
+        block_h = min(block_h, limit // hc_mult)
+    return block_h
+
 
 @libentry()
 @triton.jit
@@ -81,7 +99,7 @@ def hc_collapse_impl(x: torch.Tensor, pre_mix: torch.Tensor) -> torch.Tensor:
     if num_tokens == 0 or hidden_size == 0:
         return out
 
-    block_h = min(hidden_size, HC_COLLAPSE_BLOCK_H)
+    block_h = _block_size(hidden_size, hc_mult, x.element_size())
     num_h_blocks = (hidden_size + block_h - 1) // block_h
     grid = (min(get_num_cores("vector"), num_tokens * num_h_blocks),)
 
