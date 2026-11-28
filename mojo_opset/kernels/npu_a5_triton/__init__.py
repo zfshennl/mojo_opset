@@ -5,6 +5,7 @@ from mojo_opset.utils._exports import extend_bindings as _extend_bindings
 OPS = {
     "swa_infer": "swa",
     "moe_dynamic_quant": "quant",
+    "moe_gating_top_k": "moe_gating_top_k",
     "flex_attention": "flex_attention",
     "flex_attention_v2": "flex_attention_v2",
     "rope_cos_sin": "rope",

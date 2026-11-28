@@ -28,6 +28,7 @@ supported shapes, dtypes and options.
 | `layer_norm_quant` | torch_npu | torch_npu |
 | `lightning_indexer` | triton | triton |
 | `moe_dynamic_quant` | triton, torch_npu | triton, torch_npu |
+| `moe_gating_top_k` | triton | triton |
 | `multimodal_rope_infer` | triton | triton |
 | `n_gram_decode` | triton | triton |
 | `n_gram_prefill` | triton | triton |

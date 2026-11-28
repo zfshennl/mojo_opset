@@ -1563,6 +1563,48 @@ operators:
             - tests/performance/functions/test_quantization.py
           950/performance:
             - tests/performance/functions/test_quantization.py
+  moe_gating_top_k:
+    rules:
+      - paths:
+          - mojo_opset/functions/moe_gating_top_k.py
+          - mojo_opset/kernels/torch/moe_gating_top_k.py
+        jobs:
+          910b/performance:
+            - tests/performance/functions/test_moe_gating_top_k.py
+          910b/triton:
+            - tests/functions/test_moe_gating_top_k.py
+          950/performance:
+            - tests/performance/functions/test_moe_gating_top_k.py
+          950/triton:
+            - tests/functions/test_moe_gating_top_k.py
+      - paths:
+          - mojo_opset/kernels/npu_a2_triton/moe_gating_top_k.py
+        jobs:
+          910b/performance:
+            - tests/performance/functions/test_moe_gating_top_k.py
+          910b/triton:
+            - tests/functions/test_moe_gating_top_k.py
+      - paths:
+          - mojo_opset/kernels/npu_a5_triton/moe_gating_top_k.py
+        jobs:
+          950/performance:
+            - tests/performance/functions/test_moe_gating_top_k.py
+          950/triton:
+            - tests/functions/test_moe_gating_top_k.py
+      - paths:
+          - tests/functions/test_moe_gating_top_k.py
+        jobs:
+          910b/triton:
+            - tests/functions/test_moe_gating_top_k.py
+          950/triton:
+            - tests/functions/test_moe_gating_top_k.py
+      - paths:
+          - tests/performance/functions/test_moe_gating_top_k.py
+        jobs:
+          910b/performance:
+            - tests/performance/functions/test_moe_gating_top_k.py
+          950/performance:
+            - tests/performance/functions/test_moe_gating_top_k.py
   multimodal_rope_infer:
     rules:
       - paths:

@@ -12,6 +12,7 @@ OPS = {
     "residual_add_rms_norm_quant": "fused_quantization",
     "residual_add_layer_norm_quant": "fused_quantization",
     "moe_dynamic_quant": "fused_quantization",
+    "moe_gating_top_k": "moe_gating_top_k",
     "dequant_swiglu_quant": "fused_quantization",
     "rotate_activation": "rotate_activation",
     "flex_attention": "flex_attention",
